@@ -7,18 +7,18 @@ import { db } from './firebase'
 
 // ── Food list ──────────────────────────────────────────────
 const FOODS = [
-  { name: 'Kiribath Half Tray 1',        cat: 'Main Meal Items' },
-  { name: 'Kiribath Half Tray 2',        cat: 'Main Meal Items' },
-  { name: 'Kiribath Half Tray 3',        cat: 'Main Meal Items' },
-  { name: 'Kiribath(Rathu) Half Tray 1', cat: 'Main Meal Items' },
-  { name: 'Yellow Rice Half Tray 1',     cat: 'Main Meal Items' },
-  { name: 'Yellow Rice Half Tray 2',     cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray Slot #1',        cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray Slot #2',        cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray Slot #3',        cat: 'Main Meal Items' },
+  { name: 'Kiribath(Rathu) Half Tray', cat: 'Main Meal Items' },
+  { name: 'Yellow Rice Half Tray Slot #1',     cat: 'Main Meal Items' },
+  { name: 'Yellow Rice Half Tray Slot #2',     cat: 'Main Meal Items' },
   { name: 'Kids Noodles Half Tray',      cat: 'Main Meal Items' },
   { name: 'Konda Kewum',                 cat: 'Traditional Sweets' },
   { name: 'Butter Cake',                 cat: 'Traditional Sweets' },
   { name: 'Milk Toffee',                 cat: 'Traditional Sweets' },
-  { name: 'Kokis 1',                     cat: 'Traditional Sweets' },
-  { name: 'Kokis 2',                     cat: 'Traditional Sweets' },
+  { name: 'Kokis Slot #1',                     cat: 'Traditional Sweets' },
+  { name: 'Kokis Slot #1',                     cat: 'Traditional Sweets' },
   { name: 'Aluwa',                       cat: 'Traditional Sweets' },
   { name: 'Mung Kewum',                  cat: 'Traditional Sweets' },
   { name: 'Pol Toffee',                  cat: 'Traditional Sweets' },
@@ -185,8 +185,13 @@ export default function App() {
           Pittsburgh Aurudu Celebration
         </h1>
         <p style={{ fontSize:14, color:'#6b7280', margin:'0 0 1.25rem' }}>
-          05/09 · Garner Pavilion · North Park
-        </p>
+  05/09 · 8:30 AM until sunset &nbsp;·&nbsp;{' '}
+  <a href="https://share.google/IwYq0P0lnavxqvXis"
+    target="_blank" rel="noreferrer"
+    style={{ color:'#1d4ed8', textDecoration:'underline' }}>
+    Garner Pavilion · North Park
+  </a>
+</p>
         <p style={{ fontSize:13, color:'#6b7280', lineHeight:1.7, textAlign:'left',
           padding:'1rem 1.25rem', background:'#f9fafb', borderRadius:10, border:'1px solid #e5e7eb' }}>
           We're excited to celebrate Sinhala and Tamil New Year together! Please sign up to bring one
