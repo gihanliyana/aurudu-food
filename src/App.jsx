@@ -7,25 +7,25 @@ import { db } from './firebase'
 
 // ── Food list ──────────────────────────────────────────────
 const FOODS = [
-  { name: 'Kiribath Half Tray Slot #1',        cat: 'Main Meal Items' },
-  { name: 'Kiribath Half Tray Slot #2',        cat: 'Main Meal Items' },
-  { name: 'Kiribath Half Tray Slot #3',        cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray (Slot #1)',        cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray (Slot #2)',        cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray (Slot #3)',        cat: 'Main Meal Items' },
   { name: 'Kiribath(Rathu) Half Tray', cat: 'Main Meal Items' },
-  { name: 'Yellow Rice Half Tray Slot #1',     cat: 'Main Meal Items' },
-  { name: 'Yellow Rice Half Tray Slot #2',     cat: 'Main Meal Items' },
+  { name: 'Yellow Rice Half Tray (Slot #1)',     cat: 'Main Meal Items' },
+  { name: 'Yellow Rice Half Tray (Slot #2)',     cat: 'Main Meal Items' },
   { name: 'Kids Noodles Half Tray',      cat: 'Main Meal Items' },
   { name: 'Konda Kewum',                 cat: 'Traditional Sweets' },
   { name: 'Butter Cake',                 cat: 'Traditional Sweets' },
   { name: 'Milk Toffee',                 cat: 'Traditional Sweets' },
-  { name: 'Kokis Slot #1',                     cat: 'Traditional Sweets' },
-  { name: 'Kokis Slot #2',                     cat: 'Traditional Sweets' },
+  { name: 'Kokis (Slot #1)',                     cat: 'Traditional Sweets' },
+  { name: 'Kokis (Slot #2)',                     cat: 'Traditional Sweets' },
   { name: 'Aluwa',                       cat: 'Traditional Sweets' },
   { name: 'Mung Kewum',                  cat: 'Traditional Sweets' },
   { name: 'Pol Toffee',                  cat: 'Traditional Sweets' },
   { name: 'Banana',                      cat: 'Traditional Sweets' },
   { name: 'Welithalapa',                 cat: 'Traditional Sweets' },
   { name: 'Aggala/Munguli',              cat: 'Traditional Sweets' },
-  { name: 'Chocolate Cake',              cat: 'Traditional Sweets' },
+  { name: 'Chocolate Cake',             cat: 'Traditional Sweets' },
   { name: 'Potato/Milk Toffee',          cat: 'Traditional Sweets' },
   { name: 'Naran Kevum',                 cat: 'Traditional Sweets' },
   { name: 'Lunu Miris',                  cat: 'Curries & Sides' },
@@ -43,12 +43,11 @@ const CAT_CFG = {
   'Custom':            { bg:'#f3e8ff', text:'#6b21a8', border:'#d8b4fe', rowBg:'#faf5ff', head:'#6b21a8' },
 }
 
-// ── Helpers ────────────────────────────────────────────────
 const knownFoodSet = new Set(FOODS.map(f => f.name))
 
 function FoodTag({ food }) {
-  const cat  = FOODS.find(f => f.name === food)?.cat
-  const cfg  = cat ? CAT_CFG[cat] : CAT_CFG['Custom']
+  const cat = FOODS.find(f => f.name === food)?.cat
+  const cfg = cat ? CAT_CFG[cat] : CAT_CFG['Custom']
   return (
     <span style={{ fontSize:12, padding:'2px 9px', borderRadius:6,
       background:cfg.bg, color:cfg.text, border:`0.5px solid ${cfg.border}` }}>
@@ -68,9 +67,11 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
   const [editId, setEditId]         = useState(null)
-  const [deleteModal, setDeleteModal]         = useState(null) // { id, name }
-  const [deleteNameInput, setDeleteNameInput] = useState('')
-  const [deleteError, setDeleteError]         = useState('')
+
+  // Unified verify modal — mode is 'edit' or 'delete'
+  const [verifyModal, setVerifyModal]         = useState(null) // { mode, entry }
+  const [verifyNameInput, setVerifyNameInput] = useState('')
+  const [verifyError, setVerifyError]         = useState('')
 
   // Real-time Firestore listener
   useEffect(() => {
@@ -79,7 +80,7 @@ export default function App() {
       setSignups(snapshot.docs.map(d => ({ id: d.id, ...d.data() })))
       setLoading(false)
     })
-    return () => unsub()  // cleanup on unmount
+    return () => unsub()
   }, [])
 
   // Foods taken by people OTHER than the one currently being edited
@@ -93,18 +94,16 @@ export default function App() {
   }
 
   async function submit() {
-    if (!name.trim())              { setError('Please enter your name'); return }
+    if (!name.trim()) { setError('Please enter your name'); return }
     const extras = custom.split(',').map(s => s.trim()).filter(Boolean)
     const foods  = [...selected, ...extras]
-    if (!foods.length)             { setError('Please select or add at least one food item'); return }
+    if (!foods.length) { setError('Please select or add at least one food item'); return }
 
     setSubmitting(true); setError('')
     try {
       if (editId) {
-        // Update existing doc
         await updateDoc(doc(db, 'signups', editId), { name: name.trim(), foods, updatedAt: serverTimestamp() })
       } else {
-        // Create new doc
         await addDoc(collection(db, 'signups'), { name: name.trim(), foods, createdAt: serverTimestamp() })
       }
       setSubmitted(true); setEditId(null)
@@ -128,32 +127,38 @@ export default function App() {
     setEditId(null); setName(''); setSelected([]); setCustom(''); setError(''); setSubmitted(false)
   }
 
-  function openDeleteModal(entry) {
-    setDeleteModal({ id: entry.id, name: entry.name })
-    setDeleteNameInput('')
-    setDeleteError('')
-  }
-
-  function closeDeleteModal() {
-    setDeleteModal(null)
-    setDeleteNameInput('')
-    setDeleteError('')
-  }
-
-  async function confirmDelete() {
-    if (deleteNameInput.trim().toLowerCase() !== deleteModal.name.trim().toLowerCase()) {
-      setDeleteError('Name does not match. Please type the exact name shown.')
-      return
-    }
-    await deleteDoc(doc(db, 'signups', deleteModal.id))
-    if (editId === deleteModal.id) cancelEdit()
-    closeDeleteModal()
-  }
-
   function resetForm() {
     setSubmitted(false); setName(''); setSelected([]); setCustom(''); setError(''); setEditId(null)
   }
 
+  // ── Verify modal helpers ───────────────────────────────────
+  function openVerifyModal(mode, entry) {
+    setVerifyModal({ mode, entry })
+    setVerifyNameInput('')
+    setVerifyError('')
+  }
+
+  function closeVerifyModal() {
+    setVerifyModal(null)
+    setVerifyNameInput('')
+    setVerifyError('')
+  }
+
+  async function confirmVerify() {
+    if (verifyNameInput.trim().toLowerCase() !== verifyModal.entry.name.trim().toLowerCase()) {
+      setVerifyError('Name does not match. Please type the exact name shown.')
+      return
+    }
+    if (verifyModal.mode === 'delete') {
+      await deleteDoc(doc(db, 'signups', verifyModal.entry.id))
+      if (editId === verifyModal.entry.id) cancelEdit()
+    } else {
+      startEdit(verifyModal.entry)
+    }
+    closeVerifyModal()
+  }
+
+  // ── Derived data ───────────────────────────────────────────
   const byCategory = Object.fromEntries(
     CAT_ORDER.map(cat => [cat, FOODS.filter(f => f.cat === cat).map(f => f.name)])
   )
@@ -162,17 +167,16 @@ export default function App() {
   signups.forEach(e => (e.foods || []).forEach(f => { foodOwner[f] = e.name }))
   const whoTook = food => foodOwner[food] || null
 
-  // Custom items (not in the preset list)
   const customRows = signups.flatMap(e =>
     (e.foods || []).filter(f => !knownFoodSet.has(f)).map(f => ({ food: f, person: e.name }))
   )
 
-  // ── Styles ──────────────────────────────────────────────
   const card = {
     background: 'white', borderRadius: 12, border: '1px solid #e5e7eb',
     padding: '12px 16px', marginBottom: 10,
   }
 
+  // ── Render ─────────────────────────────────────────────────
   return (
     <div style={{ maxWidth:640, margin:'0 auto', padding:'0 1rem 3rem' }}>
 
@@ -185,13 +189,13 @@ export default function App() {
           Pittsburgh Aurudu Celebration
         </h1>
         <p style={{ fontSize:14, color:'#6b7280', margin:'0 0 1.25rem' }}>
-  05/09 · 8:30 AM until sunset &nbsp;·&nbsp;{' '}
-  <a href="https://share.google/IwYq0P0lnavxqvXis"
-    target="_blank" rel="noreferrer"
-    style={{ color:'#1d4ed8', textDecoration:'underline' }}>
-    Garner Pavilion · North Park
-  </a>
-</p>
+          05/09 · 8:30 AM until sunset &nbsp;·&nbsp;{' '}
+          <a href="https://share.google/IwYq0P0lnavxqvXis"
+            target="_blank" rel="noreferrer"
+            style={{ color:'#1d4ed8', textDecoration:'underline' }}>
+            Garner Pavilion · North Park
+          </a>
+        </p>
         <p style={{ fontSize:13, color:'#6b7280', lineHeight:1.7, textAlign:'left',
           padding:'1rem 1.25rem', background:'#f9fafb', borderRadius:10, border:'1px solid #e5e7eb' }}>
           We're excited to celebrate Sinhala and Tamil New Year together! Please sign up to bring one
@@ -242,7 +246,6 @@ export default function App() {
               <p style={{ fontSize:12, color:'#9ca3af', margin:'0 0 14px' }}>
                 Greyed out items are already taken. Highlighted items are your picks.
               </p>
-
               {CAT_ORDER.map(cat => {
                 const cfg = CAT_CFG[cat]
                 return (
@@ -290,7 +293,7 @@ export default function App() {
               </label>
               <p style={{ fontSize:12, color:'#9ca3af', margin:'0 0 8px' }}>Separate multiple items with commas</p>
               <input value={custom} onChange={e => setCustom(e.target.value)}
-                placeholder="e.g. Peni Walalu, Watalappam..." />
+                placeholder="e.g. Peni Wlalu, Watalappam..." />
             </div>
 
             {/* Selection preview */}
@@ -346,12 +349,16 @@ export default function App() {
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
                   <p style={{ fontSize:14, fontWeight:600, margin:0 }}>{entry.name}</p>
                   <div style={{ display:'flex', gap:6 }}>
-                    <button onClick={() => startEdit(entry)} style={{ fontSize:12, padding:'3px 10px',
-                      borderRadius:6, cursor:'pointer', border:'1px solid #93c5fd',
-                      background:'#dbeafe', color:'#1e40af' }}>Edit</button>
-                    <button onClick={() => openDeleteModal(entry)} style={{ fontSize:12, padding:'3px 10px',
-                      borderRadius:6, cursor:'pointer', border:'1px solid #fca5a5',
-                      background:'#fee2e2', color:'#991b1b' }}>Delete</button>
+                    <button onClick={() => openVerifyModal('edit', entry)}
+                      style={{ fontSize:12, padding:'3px 10px', borderRadius:6, cursor:'pointer',
+                        border:'1px solid #93c5fd', background:'#dbeafe', color:'#1e40af' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => openVerifyModal('delete', entry)}
+                      style={{ fontSize:12, padding:'3px 10px', borderRadius:6, cursor:'pointer',
+                        border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b' }}>
+                      Delete
+                    </button>
                   </div>
                 </div>
                 <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
@@ -448,9 +455,10 @@ export default function App() {
           </>
         )}
       </div>
-      {/* ── Delete confirmation modal ── */}
-      {deleteModal && (
-        <div onClick={closeDeleteModal} style={{
+
+      {/* ── Unified verify modal (edit & delete) ── */}
+      {verifyModal && (
+        <div onClick={closeVerifyModal} style={{
           position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
           display:'flex', alignItems:'center', justifyContent:'center',
           zIndex:1000, padding:'1rem',
@@ -460,54 +468,56 @@ export default function App() {
             width:'100%', maxWidth:400, boxShadow:'0 20px 60px rgba(0,0,0,0.2)',
           }}>
             {/* Icon */}
-            <div style={{ width:48, height:48, borderRadius:'50%', background:'#fee2e2',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              fontSize:22, margin:'0 auto 1rem' }}>
-              🗑️
+            <div style={{ width:48, height:48, borderRadius:'50%', margin:'0 auto 1rem',
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:22,
+              background: verifyModal.mode === 'delete' ? '#fee2e2' : '#dbeafe' }}>
+              {verifyModal.mode === 'delete' ? '🗑️' : '✏️'}
             </div>
 
             <h3 style={{ fontSize:17, fontWeight:700, textAlign:'center', margin:'0 0 6px', color:'#111827' }}>
-              Delete entry?
+              {verifyModal.mode === 'delete' ? 'Delete entry?' : 'Edit entry?'}
             </h3>
             <p style={{ fontSize:13, color:'#6b7280', textAlign:'center', margin:'0 0 1.25rem', lineHeight:1.6 }}>
-              You are about to remove <strong style={{ color:'#111827' }}>{deleteModal.name}</strong>'s sign-up.
-              <br />This cannot be undone.
+              {verifyModal.mode === 'delete' ? (
+                <>You are about to remove <strong style={{ color:'#111827' }}>{verifyModal.entry.name}</strong>'s sign-up.<br />This cannot be undone.</>
+              ) : (
+                <>To edit <strong style={{ color:'#111827' }}>{verifyModal.entry.name}</strong>'s entry, please verify your identity.</>
+              )}
             </p>
 
-            {/* Name verification */}
-            <div style={{ background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:8,
-              padding:'12px 14px', marginBottom:'1rem' }}>
+            {/* Name verification box */}
+            <div style={{ background:'#fff7ed', border:'1px solid #fed7aa',
+              borderRadius:8, padding:'12px 14px', marginBottom:'1rem' }}>
               <p style={{ fontSize:12, color:'#92400e', margin:'0 0 8px', fontWeight:500 }}>
-                To confirm, CONFIRM YOUR name: <strong>{deleteModal.name}</strong>
+                To confirm, TYPE YOUR name: <strong>{verifyModal.entry.name}</strong>
               </p>
               <input
-                value={deleteNameInput}
-                onChange={e => { setDeleteNameInput(e.target.value); setDeleteError('') }}
+                value={verifyNameInput}
+                onChange={e => { setVerifyNameInput(e.target.value); setVerifyError('') }}
                 placeholder="Type name here..."
                 autoFocus
-                onKeyDown={e => e.key === 'Enter' && confirmDelete()}
+                onKeyDown={e => e.key === 'Enter' && confirmVerify()}
                 style={{ width:'100%', padding:'8px 10px', borderRadius:6, fontSize:13,
-                  border: deleteError ? '1px solid #ef4444' : '1px solid #d1d5db',
+                  border: verifyError ? '1px solid #ef4444' : '1px solid #d1d5db',
                   outline:'none', boxSizing:'border-box' }}
               />
-              {deleteError && (
-                <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{deleteError}</p>
+              {verifyError && (
+                <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{verifyError}</p>
               )}
             </div>
 
             <div style={{ display:'flex', gap:8 }}>
-              <button onClick={closeDeleteModal} style={{ flex:1, padding:'10px',
-                borderRadius:8, fontSize:14, cursor:'pointer',
-                border:'1px solid #d1d5db', background:'white', color:'#374151', fontWeight:500 }}>
+              <button onClick={closeVerifyModal} style={{ flex:1, padding:'10px', borderRadius:8,
+                fontSize:14, cursor:'pointer', border:'1px solid #d1d5db',
+                background:'white', color:'#374151', fontWeight:500 }}>
                 Cancel
               </button>
-              <button onClick={confirmDelete}
-                disabled={!deleteNameInput.trim()}
+              <button onClick={confirmVerify} disabled={!verifyNameInput.trim()}
                 style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, cursor:'pointer',
-                  border:'none', fontWeight:600, color:'white',
-                  background: deleteNameInput.trim() ? '#991b1b' : '#fca5a5',
-                  transition:'background 0.15s' }}>
-                Yes, delete
+                  border:'none', fontWeight:600, color:'white', transition:'background 0.15s',
+                  background: !verifyNameInput.trim() ? '#d1d5db'
+                    : verifyModal.mode === 'delete' ? '#991b1b' : '#1e40af' }}>
+                {verifyModal.mode === 'delete' ? 'Yes, delete' : 'Yes, edit'}
               </button>
             </div>
           </div>
