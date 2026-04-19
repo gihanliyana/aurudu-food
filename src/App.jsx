@@ -478,7 +478,7 @@ export default function App() {
             <div style={{ background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:8,
               padding:'12px 14px', marginBottom:'1rem' }}>
               <p style={{ fontSize:12, color:'#92400e', margin:'0 0 8px', fontWeight:500 }}>
-                To confirm, type the name: <strong>{deleteModal.name}</strong>
+                To confirm, CONFIRM YOUR name: <strong>{deleteModal.name}</strong>
               </p>
               <input
                 value={deleteNameInput}
