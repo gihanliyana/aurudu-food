@@ -18,7 +18,7 @@ const FOODS = [
   { name: 'Butter Cake',                 cat: 'Traditional Sweets' },
   { name: 'Milk Toffee',                 cat: 'Traditional Sweets' },
   { name: 'Kokis Slot #1',                     cat: 'Traditional Sweets' },
-  { name: 'Kokis Slot #1',                     cat: 'Traditional Sweets' },
+  { name: 'Kokis Slot #2',                     cat: 'Traditional Sweets' },
   { name: 'Aluwa',                       cat: 'Traditional Sweets' },
   { name: 'Mung Kewum',                  cat: 'Traditional Sweets' },
   { name: 'Pol Toffee',                  cat: 'Traditional Sweets' },
