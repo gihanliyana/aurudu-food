@@ -68,7 +68,9 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
   const [editId, setEditId]         = useState(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [deleteModal, setDeleteModal]         = useState(null) // { id, name }
+  const [deleteNameInput, setDeleteNameInput] = useState('')
+  const [deleteError, setDeleteError]         = useState('')
 
   // Real-time Firestore listener
   useEffect(() => {
@@ -126,10 +128,26 @@ export default function App() {
     setEditId(null); setName(''); setSelected([]); setCustom(''); setError(''); setSubmitted(false)
   }
 
-  async function deleteEntry(id) {
-    await deleteDoc(doc(db, 'signups', id))
-    setDeleteConfirm(null)
-    if (editId === id) cancelEdit()
+  function openDeleteModal(entry) {
+    setDeleteModal({ id: entry.id, name: entry.name })
+    setDeleteNameInput('')
+    setDeleteError('')
+  }
+
+  function closeDeleteModal() {
+    setDeleteModal(null)
+    setDeleteNameInput('')
+    setDeleteError('')
+  }
+
+  async function confirmDelete() {
+    if (deleteNameInput.trim().toLowerCase() !== deleteModal.name.trim().toLowerCase()) {
+      setDeleteError('Name does not match. Please type the exact name shown.')
+      return
+    }
+    await deleteDoc(doc(db, 'signups', deleteModal.id))
+    if (editId === deleteModal.id) cancelEdit()
+    closeDeleteModal()
   }
 
   function resetForm() {
@@ -267,7 +285,7 @@ export default function App() {
               </label>
               <p style={{ fontSize:12, color:'#9ca3af', margin:'0 0 8px' }}>Separate multiple items with commas</p>
               <input value={custom} onChange={e => setCustom(e.target.value)}
-                placeholder="e.g. Peni Walalu, Coconut Crapes..." />
+                placeholder="e.g. Payasam, Wattalapam..." />
             </div>
 
             {/* Selection preview */}
@@ -326,7 +344,7 @@ export default function App() {
                     <button onClick={() => startEdit(entry)} style={{ fontSize:12, padding:'3px 10px',
                       borderRadius:6, cursor:'pointer', border:'1px solid #93c5fd',
                       background:'#dbeafe', color:'#1e40af' }}>Edit</button>
-                    <button onClick={() => setDeleteConfirm(entry.id)} style={{ fontSize:12, padding:'3px 10px',
+                    <button onClick={() => openDeleteModal(entry)} style={{ fontSize:12, padding:'3px 10px',
                       borderRadius:6, cursor:'pointer', border:'1px solid #fca5a5',
                       background:'#fee2e2', color:'#991b1b' }}>Delete</button>
                   </div>
@@ -334,25 +352,6 @@ export default function App() {
                 <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
                   {(entry.foods || []).map(f => <FoodTag key={f} food={f} />)}
                 </div>
-                {deleteConfirm === entry.id && (
-                  <div style={{ marginTop:10, padding:'10px 12px', borderRadius:8,
-                    background:'#fee2e2', border:'1px solid #fca5a5',
-                    display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-                    <span style={{ fontSize:13, color:'#7f1d1d', flex:1 }}>
-                      Remove {entry.name}'s entry?
-                    </span>
-                    <button onClick={() => deleteEntry(entry.id)} style={{ fontSize:13,
-                      padding:'5px 14px', borderRadius:6, cursor:'pointer',
-                      border:'none', background:'#991b1b', color:'white', fontWeight:600 }}>
-                      Yes, remove
-                    </button>
-                    <button onClick={() => setDeleteConfirm(null)} style={{ fontSize:13,
-                      padding:'5px 14px', borderRadius:6, cursor:'pointer',
-                      border:'1px solid #fca5a5', background:'white', color:'#991b1b' }}>
-                      Cancel
-                    </button>
-                  </div>
-                )}
               </div>
             ))}
 
@@ -444,6 +443,72 @@ export default function App() {
           </>
         )}
       </div>
+      {/* ── Delete confirmation modal ── */}
+      {deleteModal && (
+        <div onClick={closeDeleteModal} style={{
+          position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          zIndex:1000, padding:'1rem',
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background:'white', borderRadius:14, padding:'1.75rem',
+            width:'100%', maxWidth:400, boxShadow:'0 20px 60px rgba(0,0,0,0.2)',
+          }}>
+            {/* Icon */}
+            <div style={{ width:48, height:48, borderRadius:'50%', background:'#fee2e2',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:22, margin:'0 auto 1rem' }}>
+              🗑️
+            </div>
+
+            <h3 style={{ fontSize:17, fontWeight:700, textAlign:'center', margin:'0 0 6px', color:'#111827' }}>
+              Delete entry?
+            </h3>
+            <p style={{ fontSize:13, color:'#6b7280', textAlign:'center', margin:'0 0 1.25rem', lineHeight:1.6 }}>
+              You are about to remove <strong style={{ color:'#111827' }}>{deleteModal.name}</strong>'s sign-up.
+              <br />This cannot be undone.
+            </p>
+
+            {/* Name verification */}
+            <div style={{ background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:8,
+              padding:'12px 14px', marginBottom:'1rem' }}>
+              <p style={{ fontSize:12, color:'#92400e', margin:'0 0 8px', fontWeight:500 }}>
+                To confirm, type the name: <strong>{deleteModal.name}</strong>
+              </p>
+              <input
+                value={deleteNameInput}
+                onChange={e => { setDeleteNameInput(e.target.value); setDeleteError('') }}
+                placeholder="Type name here..."
+                autoFocus
+                onKeyDown={e => e.key === 'Enter' && confirmDelete()}
+                style={{ width:'100%', padding:'8px 10px', borderRadius:6, fontSize:13,
+                  border: deleteError ? '1px solid #ef4444' : '1px solid #d1d5db',
+                  outline:'none', boxSizing:'border-box' }}
+              />
+              {deleteError && (
+                <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{deleteError}</p>
+              )}
+            </div>
+
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={closeDeleteModal} style={{ flex:1, padding:'10px',
+                borderRadius:8, fontSize:14, cursor:'pointer',
+                border:'1px solid #d1d5db', background:'white', color:'#374151', fontWeight:500 }}>
+                Cancel
+              </button>
+              <button onClick={confirmDelete}
+                disabled={!deleteNameInput.trim()}
+                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, cursor:'pointer',
+                  border:'none', fontWeight:600, color:'white',
+                  background: deleteNameInput.trim() ? '#991b1b' : '#fca5a5',
+                  transition:'background 0.15s' }}>
+                Yes, delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
