@@ -1,9 +1,92 @@
 import { useState, useEffect } from 'react'
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy, runTransaction, getDocs
+  doc, serverTimestamp, query, orderBy, runTransaction, getDocs,
+  setDoc, increment
 } from 'firebase/firestore'
 import { db } from './firebase'
+
+// ── Phone gate ─────────────────────────────────────────────
+const LS_KEY = 'aurudu_phone'
+
+function normalisePhone(raw) {
+  return raw.replace(/\D/g, '') // digits only for storage key
+}
+
+function PhoneGate({ onAccess }) {
+  const [phone, setPhone]     = useState('')
+  const [error, setError]     = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    const digits = normalisePhone(phone)
+    if (digits.length < 7) { setError('Please enter a valid phone number'); return }
+    setLoading(true)
+    try {
+      // Upsert into access_log — key by digits so each phone has one doc
+      const ref = doc(db, 'access_log', digits)
+      await setDoc(ref, {
+        phone: phone.trim(),
+        lastAccessed: serverTimestamp(),
+        accessCount: increment(1),
+      }, { merge: true })
+      localStorage.setItem(LS_KEY, phone.trim())
+      onAccess(phone.trim())
+    } catch (err) {
+      console.error(err)
+      setError('Something went wrong. Please try again.')
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center',
+      justifyContent:'center', padding:'1rem', background:'#f9fafb' }}>
+      <div style={{ background:'white', borderRadius:16, padding:'2rem',
+        width:'100%', maxWidth:380, boxShadow:'0 4px 24px rgba(0,0,0,0.08)',
+        border:'1px solid #e5e7eb' }}>
+        <div style={{ textAlign:'center', marginBottom:'1.5rem' }}>
+          <div style={{ fontSize:36, marginBottom:12 }}>!!</div>
+          <h1 style={{ fontSize:20, fontWeight:700, margin:'0 0 6px', color:'#111827' }}>
+            SL Pitts Aurudu 2026
+          </h1>
+          <p style={{ fontSize:13, color:'#6b7280', margin:0, lineHeight:1.6 }}>
+            This page is for invited families only.<br />
+            Please enter your phone number to continue.
+          </p>
+        </div>
+
+        <div style={{ marginBottom:'1rem' }}>
+          <label style={{ fontSize:13, fontWeight:500, color:'#374151',
+            display:'block', marginBottom:6 }}>Phone number</label>
+          <input
+            type="tel"
+            value={phone}
+            onChange={e => { setPhone(e.target.value); setError('') }}
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            placeholder="e.g. 412-377-7786"
+            autoFocus
+            style={{ width:'100%', padding:'10px 12px', borderRadius:8, fontSize:14,
+              border: error ? '1px solid #ef4444' : '1px solid #d1d5db',
+              outline:'none', boxSizing:'border-box' }}
+          />
+          {error && <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{error}</p>}
+        </div>
+
+        <p style={{ fontSize:11, color:'#9ca3af', margin:'0 0 1rem', lineHeight:1.5 }}>
+          Your number is only used to track the food signup. No spams 😄
+        </p>
+
+        <button onClick={handleSubmit} disabled={loading}
+          style={{ width:'100%', padding:'11px', borderRadius:8, fontSize:14,
+            fontWeight:600, cursor:'pointer', border:'none',
+            background: loading ? '#4ade80' : '#166534', color:'white' }}>
+          {loading ? 'Verifying...' : 'Continue'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 // ── Food list ──────────────────────────────────────────────
 const FOODS = [
@@ -58,6 +141,7 @@ function FoodTag({ food }) {
 
 // ── Main component ─────────────────────────────────────────
 export default function App() {
+  const [accessPhone, setAccessPhone] = useState(() => localStorage.getItem(LS_KEY) || '')
   const [name, setName]             = useState('')
   const [selected, setSelected]     = useState([])
   const [custom, setCustom]         = useState('')
@@ -72,6 +156,22 @@ export default function App() {
   const [verifyModal, setVerifyModal]         = useState(null) // { mode, entry }
   const [verifyNameInput, setVerifyNameInput] = useState('')
   const [verifyError, setVerifyError]         = useState('')
+
+  // Log returning visitor access on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(LS_KEY)
+    if (saved) {
+      const digits = saved.replace(/\D/g, '')
+      if (digits.length >= 7) {
+        const ref = doc(db, 'access_log', digits)
+        setDoc(ref, {
+          phone: saved,
+          lastAccessed: serverTimestamp(),
+          accessCount: increment(1),
+        }, { merge: true }).catch(console.error)
+      }
+    }
+  }, [])
 
   // Real-time Firestore listener
   useEffect(() => {
@@ -212,6 +312,10 @@ export default function App() {
   }
 
   // ── Render ─────────────────────────────────────────────────
+  if (!accessPhone) {
+    return <PhoneGate onAccess={setAccessPhone} />
+  }
+
   return (
     <div style={{ maxWidth:640, margin:'0 auto', padding:'0 1rem 3rem' }}>
 
