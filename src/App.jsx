@@ -221,7 +221,7 @@ export default function App() {
           අලුත් අවුරුදු 2026
         </p>
         <h1 style={{ fontSize:24, fontWeight:600, margin:'0 0 4px', color:'#111827' }}>
-          Pittsburgh Aurudu Celebration
+          SL Pitts Aurudu Celebration
         </h1>
         <p style={{ fontSize:14, color:'#6b7280', margin:'0 0 1.25rem' }}>
           05/09 · 8:30 AM until sunset &nbsp;·&nbsp;{' '}
