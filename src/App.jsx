@@ -1,37 +1,37 @@
 import { useState, useEffect } from 'react'
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy
+  doc, serverTimestamp, query, orderBy, runTransaction, getDocs
 } from 'firebase/firestore'
 import { db } from './firebase'
 
 // ── Food list ──────────────────────────────────────────────
 const FOODS = [
-  { name: 'Kiribath Half Tray (Slot #1)',        cat: 'Main Meal Items' },
-  { name: 'Kiribath Half Tray (Slot #2)',        cat: 'Main Meal Items' },
-  { name: 'Kiribath Half Tray (Slot #3)',        cat: 'Main Meal Items' },
-  { name: 'Kiribath(Rathu) Half Tray', cat: 'Main Meal Items' },
-  { name: 'Yellow Rice Half Tray (Slot #1)',     cat: 'Main Meal Items' },
-  { name: 'Yellow Rice Half Tray (Slot #2)',     cat: 'Main Meal Items' },
-  { name: 'Kids Noodles Half Tray',      cat: 'Main Meal Items' },
-  { name: 'Konda Kewum',                 cat: 'Traditional Sweets' },
-  { name: 'Butter Cake',                 cat: 'Traditional Sweets' },
-  { name: 'Milk Toffee',                 cat: 'Traditional Sweets' },
-  { name: 'Kokis (Slot #1)',                     cat: 'Traditional Sweets' },
-  { name: 'Kokis (Slot #2)',                     cat: 'Traditional Sweets' },
-  { name: 'Aluwa',                       cat: 'Traditional Sweets' },
-  { name: 'Mung Kewum',                  cat: 'Traditional Sweets' },
-  { name: 'Pol Toffee',                  cat: 'Traditional Sweets' },
-  { name: 'Banana',                      cat: 'Traditional Sweets' },
-  { name: 'Welithalapa',                 cat: 'Traditional Sweets' },
-  { name: 'Aggala/Munguli',              cat: 'Traditional Sweets' },
-  { name: 'Chocolate Cake',             cat: 'Traditional Sweets' },
-  { name: 'Potato/Milk Toffee',          cat: 'Traditional Sweets' },
-  { name: 'Naran Kevum',                 cat: 'Traditional Sweets' },
-  { name: 'Lunu Miris',                  cat: 'Curries & Sides' },
-  { name: 'Dhal Curry',                  cat: 'Curries & Sides' },
-  { name: 'Chicken Curry',               cat: 'Curries & Sides' },
-  { name: 'Fish Ambul Thiyal',           cat: 'Curries & Sides' },
+  { name: 'Kiribath Half Tray (Slot #1)', cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray (Slot #2)', cat: 'Main Meal Items' },
+  { name: 'Kiribath Half Tray (Slot #3)', cat: 'Main Meal Items' },
+  { name: 'Kiribath(Rathu) Half Tray',    cat: 'Main Meal Items' },
+  { name: 'Yellow Rice Half Tray (Slot #1)', cat: 'Main Meal Items' },
+  { name: 'Yellow Rice Half Tray (Slot #2)', cat: 'Main Meal Items' },
+  { name: 'Kids Noodles Half Tray',       cat: 'Main Meal Items' },
+  { name: 'Konda Kewum',                  cat: 'Traditional Sweets' },
+  { name: 'Butter Cake',                  cat: 'Traditional Sweets' },
+  { name: 'Milk Toffee',                  cat: 'Traditional Sweets' },
+  { name: 'Kokis (Slot #1)',              cat: 'Traditional Sweets' },
+  { name: 'Kokis (Slot #2)',              cat: 'Traditional Sweets' },
+  { name: 'Aluwa',                        cat: 'Traditional Sweets' },
+  { name: 'Mung Kewum',                   cat: 'Traditional Sweets' },
+  { name: 'Pol Toffee',                   cat: 'Traditional Sweets' },
+  { name: 'Banana',                       cat: 'Traditional Sweets' },
+  { name: 'Welithalapa',                  cat: 'Traditional Sweets' },
+  { name: 'Aggala/Munguli',               cat: 'Traditional Sweets' },
+  { name: 'Chocolate Cake',               cat: 'Traditional Sweets' },
+  { name: 'Potato/Milk Toffee',           cat: 'Traditional Sweets' },
+  { name: 'Naran Kevum',                  cat: 'Traditional Sweets' },
+  { name: 'Lunu Miris',                   cat: 'Curries & Sides' },
+  { name: 'Dhal Curry',                   cat: 'Curries & Sides' },
+  { name: 'Chicken Curry',                cat: 'Curries & Sides' },
+  { name: 'Fish Ambul Thiyal',            cat: 'Curries & Sides' },
 ]
 
 const CAT_ORDER = ['Main Meal Items', 'Traditional Sweets', 'Curries & Sides']
@@ -93,6 +93,7 @@ export default function App() {
     setSelected(p => p.includes(food) ? p.filter(f => f !== food) : [...p, food])
   }
 
+  // ── Submit with transaction to prevent concurrent conflicts ──
   async function submit() {
     if (!name.trim()) { setError('Please enter your name'); return }
     const extras = custom.split(',').map(s => s.trim()).filter(Boolean)
@@ -101,15 +102,49 @@ export default function App() {
 
     setSubmitting(true); setError('')
     try {
-      if (editId) {
-        await updateDoc(doc(db, 'signups', editId), { name: name.trim(), foods, updatedAt: serverTimestamp() })
-      } else {
-        await addDoc(collection(db, 'signups'), { name: name.trim(), foods, createdAt: serverTimestamp() })
-      }
+      await runTransaction(db, async (transaction) => {
+        // Read the absolute latest signups from Firestore at save time
+        const snapshot = await getDocs(collection(db, 'signups'))
+        const currentSignups = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+
+        // Find all foods taken by others right now (excluding current edit)
+        const takenNow = new Set(
+          currentSignups
+            .filter(e => e.id !== editId)
+            .flatMap(e => e.foods || [])
+        )
+
+        // Detect any conflicts with preset list items only
+        const conflicts = foods.filter(f => knownFoodSet.has(f) && takenNow.has(f))
+        if (conflicts.length > 0) {
+          // Auto-remove conflicting items so user is not stuck with disabled chips
+          setSelected(prev => prev.filter(f => !conflicts.includes(f)))
+          throw new Error(
+            `"${conflicts.join('", "')}" ${
+              conflicts.length === 1 ? 'was' : 'were'
+            } just taken by someone else and ${
+              conflicts.length === 1 ? 'has' : 'have'
+            } been removed from your selections. Please review and sign up again.`
+          )
+        }
+
+        // All clear — write to Firestore
+        if (editId) {
+          transaction.update(doc(db, 'signups', editId), {
+            name: name.trim(), foods, updatedAt: serverTimestamp()
+          })
+        } else {
+          const newRef = doc(collection(db, 'signups'))
+          transaction.set(newRef, {
+            name: name.trim(), foods, createdAt: serverTimestamp()
+          })
+        }
+      })
+
       setSubmitted(true); setEditId(null)
     } catch (err) {
       console.error(err)
-      setError('Something went wrong, please try again.')
+      setError(err.message || 'Something went wrong, please try again.')
     }
     setSubmitting(false)
   }
@@ -186,7 +221,7 @@ export default function App() {
           අලුත් අවුරුදු 2026
         </p>
         <h1 style={{ fontSize:24, fontWeight:600, margin:'0 0 4px', color:'#111827' }}>
-          SL Pitts Aurudu Celebration
+          Pittsburgh Aurudu Celebration
         </h1>
         <p style={{ fontSize:14, color:'#6b7280', margin:'0 0 1.25rem' }}>
           05/09 · 8:30 AM until sunset &nbsp;·&nbsp;{' '}
@@ -293,7 +328,7 @@ export default function App() {
               </label>
               <p style={{ fontSize:12, color:'#9ca3af', margin:'0 0 8px' }}>Separate multiple items with commas</p>
               <input value={custom} onChange={e => setCustom(e.target.value)}
-                placeholder="e.g. Peni Walalu, Watalappam..." />
+                placeholder="e.g. Payasam, Wattalapam..." />
             </div>
 
             {/* Selection preview */}
@@ -309,11 +344,17 @@ export default function App() {
               </div>
             )}
 
-            {error && <p style={{ fontSize:13, color:'#991b1b', marginBottom:'0.75rem' }}>{error}</p>}
+            {error && (
+              <div style={{ fontSize:13, color:'#991b1b', marginBottom:'0.75rem', padding:'10px 14px',
+                background:'#fee2e2', borderRadius:8, border:'1px solid #fca5a5', lineHeight:1.5 }}>
+                {error}
+              </div>
+            )}
 
             <button onClick={submit} disabled={submitting} style={{ width:'100%', padding:'11px',
               borderRadius:8, fontSize:14, fontWeight:600, cursor:'pointer',
-              background:'#166534', color:'white', border:'none' }}>
+              background: submitting ? '#4ade80' : '#166534', color:'white', border:'none',
+              transition:'background 0.15s' }}>
               {submitting ? 'Saving...' : editId ? 'Save changes' : 'Sign up'}
             </button>
             {editId && (
@@ -467,7 +508,6 @@ export default function App() {
             background:'white', borderRadius:14, padding:'1.75rem',
             width:'100%', maxWidth:400, boxShadow:'0 20px 60px rgba(0,0,0,0.2)',
           }}>
-            {/* Icon */}
             <div style={{ width:48, height:48, borderRadius:'50%', margin:'0 auto 1rem',
               display:'flex', alignItems:'center', justifyContent:'center', fontSize:22,
               background: verifyModal.mode === 'delete' ? '#fee2e2' : '#dbeafe' }}>
@@ -485,11 +525,10 @@ export default function App() {
               )}
             </p>
 
-            {/* Name verification box */}
             <div style={{ background:'#fff7ed', border:'1px solid #fed7aa',
               borderRadius:8, padding:'12px 14px', marginBottom:'1rem' }}>
               <p style={{ fontSize:12, color:'#92400e', margin:'0 0 8px', fontWeight:500 }}>
-                To confirm, TYPE YOUR name: <strong>{verifyModal.entry.name}</strong>
+                To confirm, type the name: <strong>{verifyModal.entry.name}</strong>
               </p>
               <input
                 value={verifyNameInput}
