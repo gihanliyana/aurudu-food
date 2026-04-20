@@ -328,7 +328,7 @@ export default function App() {
               </label>
               <p style={{ fontSize:12, color:'#9ca3af', margin:'0 0 8px' }}>Separate multiple items with commas</p>
               <input value={custom} onChange={e => setCustom(e.target.value)}
-                placeholder="e.g. Payasam, Wattalapam..." />
+                placeholder="e.g. Peni Walalu, Lavariya..." />
             </div>
 
             {/* Selection preview */}
