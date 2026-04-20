@@ -46,7 +46,7 @@ function PhoneGate({ onAccess }) {
         width:'100%', maxWidth:380, boxShadow:'0 4px 24px rgba(0,0,0,0.08)',
         border:'1px solid #e5e7eb' }}>
         <div style={{ textAlign:'center', marginBottom:'1.5rem' }}>
-          <div style={{ fontSize:36, marginBottom:12 }}>!!</div>
+          <div style={{ fontSize:36, marginBottom:12 }}>🇱🇰</div>
           <h1 style={{ fontSize:20, fontWeight:700, margin:'0 0 6px', color:'#111827' }}>
             SL Pitts Aurudu 2026
           </h1>
