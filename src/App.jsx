@@ -441,8 +441,8 @@ function FamiliesPage() {
     adultWomen: allMembers.filter(m => m.age >= 18 && m.gender === 'Female').length,
     adultOther: allMembers.filter(m => m.age >= 18 && m.gender === 'Other').length,
     babies:     allMembers.filter(m => m.age >= 0 && m.age < 4).length,
-    kids4to8:   allMembers.filter(m => m.age >= 4 && m.age < 8).length,
-    kids8to18:  allMembers.filter(m => m.age >= 8 && m.age < 18).length,
+    kids4to8:   allMembers.filter(m => m.age >= 4 && m.age < 10).length,
+    kids8to18:  allMembers.filter(m => m.age >= 10 && m.age < 18).length,
   }
   const totalAdults = stats.adultMen + stats.adultWomen + stats.adultOther
 
@@ -551,8 +551,8 @@ function FamiliesPage() {
               { label:'Families',      val: stats.families,   bg:'#eff6ff', color:'#1e40af' },
               { label:'Adults (18+)',  val: totalAdults,       bg:'#f0fdf4', color:'#166534' },
               { label:'Babies (0–4)', val: stats.babies,      bg:'#fef3c7', color:'#92400e' },
-              { label:'Kids (4–8)',   val: stats.kids4to8,    bg:'#fff5f5', color:'#991b1b' },
-              { label:'Kids (8–18)', val: stats.kids8to18,    bg:'#faf5ff', color:'#6b21a8' },
+              { label:'Kids (4–10)',   val: stats.kids4to8,    bg:'#fff5f5', color:'#991b1b' },
+              { label:'Kids (10–18)', val: stats.kids8to18,    bg:'#faf5ff', color:'#6b21a8' },
               { label:'Total people', val: allMembers.length,  bg:'#f9fafb', color:'#374151' },
             ].map(s => (
               <div key={s.label} style={{ padding:'12px 14px', background:s.bg,
@@ -611,9 +611,9 @@ function FamiliesPage() {
                 </thead>
                 <tbody>
                   {(family.members || []).map((m, i) => {
-                    const group = m.age < 4 ? 'Baby' : m.age < 8 ? 'Kid (4–8)' : m.age < 18 ? 'Kid (8–18)' : 'Adult'
-                    const groupColor = m.age < 4 ? '#92400e' : m.age < 8 ? '#991b1b' : m.age < 18 ? '#6b21a8' : '#166534'
-                    const groupBg   = m.age < 4 ? '#fef3c7' : m.age < 8 ? '#fee2e2' : m.age < 18 ? '#f3e8ff' : '#dcfce7'
+                    const group = m.age < 4 ? 'Baby' : m.age < 10 ? 'Kid (4–10)' : m.age < 18 ? 'Kid (10–18)' : 'Adult'
+                    const groupColor = m.age < 4 ? '#92400e' : m.age < 10 ? '#991b1b' : m.age < 18 ? '#6b21a8' : '#166534'
+                    const groupBg   = m.age < 4 ? '#fef3c7' : m.age < 10 ? '#fee2e2' : m.age < 18 ? '#f3e8ff' : '#dcfce7'
                     return (
                       <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#f8fafc' }}>
                         <td style={{ padding:'8px 14px', color:'#111827', borderBottom:'0.5px solid #e5e7eb' }}>{m.name}</td>
@@ -1118,8 +1118,8 @@ function FoodPage() {
 const MOD_PASSWORD = 'slpitts2026'
 
 const COLS = [
-  { key:'kids8under',   label:'Kids\nUnder 8', short:'K<8',  bg:'#fef3c7', text:'#92400e', border:'#fcd34d' },
-  { key:'kids8over',    label:'Kids\nOver 8',  short:'K>8',  bg:'#dbeafe', text:'#1e40af', border:'#93c5fd' },
+  { key:'kids8under',   label:'Kids\nUnder 10', short:'K<10', bg:'#fef3c7', text:'#92400e', border:'#fcd34d' },
+  { key:'kids8over',    label:'Kids\n10 – 18',  short:'K>10', bg:'#dbeafe', text:'#1e40af', border:'#93c5fd' },
   { key:'adultsCommon', label:'Adults\nCommon', short:'A-Com', bg:'#dcfce7', text:'#166534', border:'#86efac' },
   { key:'adultsMen',   label:'Adults\nMen',   short:'A-Men', bg:'#eff6ff', text:'#1e40af', border:'#bfdbfe' },
   { key:'adultsWomen', label:'Adults\nWomen', short:'A-Wom', bg:'#fce7f3', text:'#9d174d', border:'#fbcfe8' },
