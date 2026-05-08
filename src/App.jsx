@@ -268,13 +268,14 @@ function HomePage({ setPage, signupCount, familyCount }) {
         <div style={{ fontSize:13, color:'#6b7280', lineHeight:1.7, textAlign:'left',
           padding:'1rem 1.25rem', background:'#f9fafb', borderRadius:12, border:'1px solid #e5e7eb',
           marginBottom:'1.25rem' }}>
-          We’re excited to celebrate Sinhala and Tamil New Year together as the SL Pitts Friends community, a group of Sri Lankan friends who met in Pittsburgh and continue to share our traditions and memories.
+          We're excited to celebrate Sinhala and Tamil New Year together! Please sign up to bring one
+          or more food items from the list. You can also add a custom dish if you prefer.
           <br /><br />
-          This app is created to help organize the event smoothly, including food registration, games, and gift coordination for everyone attending.
+          We'll have around 19 families (30 adults, 6 big kids, and 6 small kids), so every
+          contribution helps. We're also sharing lunch items. If all items aren't covered, we may
+          arrange catering and split the cost among families later.
           <br /><br />
-          Our goal is simple: to come together, have fun, and create a joyful space where both adults and kids can experience and enjoy the Sri Lankan New Year traditions, especially the cultural activities, games, and festive atmosphere many of us miss from back home.
-          <br /><br />
-          Looking forward to celebrating, laughing, and making great memories together! 🇱🇰✨
+          Thank you for helping make this a great celebration!
         </div>
       </div>
 
