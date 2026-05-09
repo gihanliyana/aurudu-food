@@ -8,7 +8,6 @@ import { db } from './firebase'
 
 // ─────────────────────────────────────────────────────────────
 // Constants
-//Update 05/08
 // ─────────────────────────────────────────────────────────────
 const LS_KEY = 'aurudu_phone'
 
@@ -1117,7 +1116,7 @@ function FoodPage() {
 // ─────────────────────────────────────────────────────────────
 // Games Page
 // ─────────────────────────────────────────────────────────────
-const MOD_PASSWORD = 'slpitts2026'
+const MOD_PASSWORD = 'slpmod2026'
 
 const COLS = [
   { key:'kids8under',   label:'Kids\nUnder 10', short:'K<10', bg:'#fef3c7', text:'#92400e', border:'#fcd34d' },
@@ -1138,7 +1137,7 @@ const DEFAULT_GAMES = [
   { name:'Dehi Gediya Handa Matha Thaba Diveema',kids8under:false, kids8over:true,  adultsCommon:true,  adultsMen:false, adultsWomen:false, group:false },
   { name:'Balloon Pipiraveema',                   kids8under:true,  kids8over:true,  adultsCommon:false, adultsMen:true,  adultsWomen:true,  group:false },
   { name:'Beema Baten Beema Beema',               kids8under:true,  kids8over:true,  adultsCommon:false, adultsMen:true,  adultsWomen:true,  group:false },
-  { name:'Sagaunu Amuiththa Thereema',            kids8under:false, kids8over:true,  adultsCommon:true,  adultsMen:false, adultsWomen:false, group:false },
+  { name:'Sagaunu Amutha Thereema',            kids8under:false, kids8over:true,  adultsCommon:true,  adultsMen:false, adultsWomen:false, group:false },
   { name:'Gaslabu Gediye Ata Ganan Kireema',      kids8under:false, kids8over:true,  adultsCommon:true,  adultsMen:false, adultsWomen:false, group:false },
   { name:'Deweema',                               kids8under:true,  kids8over:true,  adultsCommon:false, adultsMen:true,  adultsWomen:true,  group:false },
   { name:'Pani Bambara',                          kids8under:false, kids8over:false, adultsCommon:false, adultsMen:false, adultsWomen:false, group:true  },
@@ -1167,230 +1166,1072 @@ function Tick({ yes }) {
   return <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>
 }
 
+// Games with fully custom logic — handled separately in special panels below
+const SPECIAL_GAMES = ['Sagaunu Amutha Thereema', 'Gaslabu Gediye Ata Ganan Kireema']
+// Group games — winner entry is captain/team name (coordinator only)
+const GROUP_GAMES   = ['Tug-of-War (Kamba Adeema)', 'Pani Bambara', 'Act & Pass']
+// Nothing is fully excluded anymore — all games get a winner entry slot
+const WINNER_EXCLUDED = SPECIAL_GAMES  // these are handled by their own panels
+const GC_PASSWORD         = 'slpittsgc'    // general game coordinator (winner entry)
+const SAGAUNU_GC_PASSWORD = 'slpittssa'    // coordinator for Sagaunu Amutha game only
+const GASLABU_GC_PASSWORD = 'slpittsga'    // coordinator for Gaslabu game only
+const WINNERS_STORE_KEY = 'aurudu_winners_v1'
+
+// ── localStorage keys for special games ──
+const SAGAUNU_KEY  = 'aurudu_sagaunu_v1'
+const GASLABU_KEY  = 'aurudu_gaslabu_v1'
+
+function lsGet(key, def) {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : def } catch { return def }
+}
+function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)) } catch {} }
+
+// ─────────────────────────────────────────────────────────────
+// Special Game: Sagaunu Amutha Thereema
+// ─────────────────────────────────────────────────────────────
+function SagaunuPanel({ onWinnerSet, families }) {
+  const allPeople = families.flatMap(f => (f.members || []).map(m => m.name)).sort()
+
+  const [data, setData]           = useState(() => lsGet(SAGAUNU_KEY, { secret:null, votes:[], revealed:false }))
+  const [gcAuth, setGcAuth]       = useState(false)
+  const [gcPrompt, setGcPrompt]   = useState(false)
+  const [phase, setPhase]         = useState('vote')
+  const [secretPick, setSecretPick] = useState('')
+  const [secretErr, setSecretErr]   = useState('')
+  const [vGuess, setVGuess]   = useState('')
+  const [vName, setVName]     = useState('')
+  const [vErr, setVErr]       = useState('')
+  const [resetConfirm, setResetConfirm] = useState(false)
+
+  function persist(next) { setData(next); lsSet(SAGAUNU_KEY, next) }
+
+  function handleGcLogin(pass, setErr) {
+    if (pass !== SAGAUNU_GC_PASSWORD) { setErr('Incorrect password.'); return }
+    setGcAuth(true); setGcPrompt(false)
+  }
+
+  function saveSecret() {
+    if (!secretPick) { setSecretErr('Please select a person.'); return }
+    persist({ ...data, secret: secretPick })
+    setSecretPick(''); setSecretErr('')
+  }
+
+  function submitVote() {
+    if (!vGuess) { setVErr('Please select your guess.'); return }
+    if (!vName.trim()) { setVErr('Please enter your name.'); return }
+    const already = data.votes.find(v => v.guesserName.trim().toLowerCase() === vName.trim().toLowerCase())
+    if (already) { setVErr('This name has already voted. Each person can only vote once.'); return }
+    const vote = { guesserName: vName.trim(), guessedPerson: vGuess, ts: Date.now() }
+    persist({ ...data, votes: [...data.votes, vote] })
+    setVGuess(''); setVName(''); setPhase('thanks')
+    setTimeout(() => setPhase('vote'), 3000)
+  }
+
+  function reveal() {
+    if (!data.secret) return
+    const correct = data.votes.filter(v => v.guessedPerson === data.secret)
+    if (correct.length > 0) {
+      correct.sort((a,b) => a.ts - b.ts)
+      onWinnerSet(`${correct[0].guesserName} (guessed correctly at ${new Date(correct[0].ts).toLocaleTimeString()})`)
+    } else {
+      onWinnerSet('No correct guesses — no winner')
+    }
+    persist({ ...data, revealed: true })
+  }
+
+  function doReset(pass, setErr) {
+    if (pass !== SAGAUNU_GC_PASSWORD) { setErr('Incorrect coordinator password.'); return }
+    persist({ secret:null, votes:[], revealed:false })
+    onWinnerSet(null)
+    setResetConfirm(false); setPhase('vote')
+  }
+
+  const secretSet  = !!data.secret
+  const isRevealed = data.revealed
+
+  return (
+    <div style={{ border:'1px solid #d8b4fe', borderRadius:12, overflow:'hidden', marginTop:8 }}>
+      {/* Header */}
+      <div style={{ padding:'10px 14px', background:'linear-gradient(135deg,#7e22ce,#a855f7)',
+        display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:6 }}>
+        <div>
+          <span style={{ fontSize:13, fontWeight:700, color:'white' }}>🔮 Sagaunu Amutha Thereema</span>
+          <span style={{ fontSize:11, color:'rgba(255,255,255,0.75)', marginLeft:8 }}>
+            {data.votes.length} vote{data.votes.length !== 1 ? 's' : ''} recorded
+          </span>
+        </div>
+        {gcAuth && !isRevealed && (
+          <div style={{ display:'flex', gap:6 }}>
+            {secretSet && (
+              <button onClick={reveal}
+                style={{ fontSize:11, padding:'4px 12px', borderRadius:7, cursor:'pointer',
+                  border:'none', background:'#fbbf24', color:'#1f2937', fontWeight:700 }}>
+                🔓 Reveal & pick winner
+              </button>
+            )}
+            <button onClick={() => setResetConfirm(true)}
+              style={{ fontSize:11, padding:'4px 10px', borderRadius:7, cursor:'pointer',
+                border:'1px solid rgba(255,255,255,0.4)', background:'rgba(255,0,0,0.25)', color:'white', fontWeight:600 }}>
+              🗑 Reset
+            </button>
+          </div>
+        )}
+        {!gcAuth && (
+          <button onClick={() => setGcPrompt(true)}
+            style={{ fontSize:11, padding:'4px 12px', borderRadius:7, cursor:'pointer',
+              border:'1px solid rgba(255,255,255,0.5)', background:'transparent', color:'white', fontWeight:600 }}>
+            🔐 Coordinator login
+          </button>
+        )}
+        {gcAuth && isRevealed && (
+          <button onClick={() => setResetConfirm(true)}
+            style={{ fontSize:11, padding:'4px 10px', borderRadius:7, cursor:'pointer',
+              border:'1px solid rgba(255,255,255,0.4)', background:'rgba(255,0,0,0.25)', color:'white', fontWeight:600 }}>
+            🗑 Reset
+          </button>
+        )}
+      </div>
+
+      <div style={{ padding:'12px 14px', background:'#faf5ff' }}>
+        {/* GC: set secret */}
+        {gcAuth && !isRevealed && (
+          <div style={{ background:'white', border:'1px solid #d8b4fe', borderRadius:10, padding:'12px',
+            marginBottom:'12px' }}>
+            <p style={{ fontSize:12, fontWeight:600, color:'#6b21a8', margin:'0 0 8px' }}>
+              🔐 Coordinator: {secretSet ? `Secret person is set (${data.secret})` : 'Set the secret Sagaunu Amutha'}
+            </p>
+            {!secretSet ? (
+              <div style={{ display:'flex', gap:6 }}>
+                <select value={secretPick} onChange={e => { setSecretPick(e.target.value); setSecretErr('') }}
+                  style={{ flex:1, padding:'7px 10px', borderRadius:7, fontSize:13,
+                    border: secretErr ? '1px solid #ef4444' : '1px solid #d1d5db',
+                    outline:'none', background:'white', cursor:'pointer' }}>
+                  <option value=''>— Select person —</option>
+                  {allPeople.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <button onClick={saveSecret}
+                  style={{ padding:'7px 14px', borderRadius:7, fontSize:13, fontWeight:600,
+                    cursor:'pointer', border:'none', background:'#7e22ce', color:'white' }}>
+                  Set
+                </button>
+              </div>
+            ) : (
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontSize:13, color:'#166534', fontWeight:600 }}>✓ Secret locked in</span>
+                <button onClick={() => persist({ ...data, secret:null })}
+                  style={{ fontSize:11, padding:'3px 10px', borderRadius:6, cursor:'pointer',
+                    border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b' }}>
+                  Change
+                </button>
+              </div>
+            )}
+            {secretErr && <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{secretErr}</p>}
+          </div>
+        )}
+
+        {/* Revealed results */}
+        {isRevealed && (
+          <div style={{ background:'#f3e8ff', border:'1px solid #d8b4fe', borderRadius:10, padding:'12px', marginBottom:'12px' }}>
+            <p style={{ fontSize:13, fontWeight:700, color:'#6b21a8', margin:'0 0 8px' }}>
+              🔓 Revealed! Secret Sagaunu Amutha: <strong>{data.secret || '—'}</strong>
+            </p>
+            <div style={{ maxHeight:200, overflowY:'auto' }}>
+              {data.votes.length === 0
+                ? <p style={{ fontSize:12, color:'#9ca3af', margin:0 }}>No votes were submitted.</p>
+                : data.votes.slice().sort((a,b)=>a.ts-b.ts).map((v,i) => (
+                  <div key={i} style={{ display:'flex', justifyContent:'space-between',
+                    padding:'5px 8px', background: v.guessedPerson===data.secret ? '#dcfce7' : 'white',
+                    borderRadius:6, marginBottom:4, border: v.guessedPerson===data.secret ? '1px solid #86efac' : '1px solid #e5e7eb' }}>
+                    <span style={{ fontSize:12, color:'#111827' }}>
+                      {v.guessedPerson===data.secret ? '✅' : '❌'} <strong>{v.guesserName}</strong> → {v.guessedPerson}
+                    </span>
+                    <span style={{ fontSize:11, color:'#9ca3af' }}>{new Date(v.ts).toLocaleTimeString()}</span>
+                  </div>
+                ))
+              }
+            </div>
+            {gcAuth && (
+              <button onClick={() => setResetConfirm(true)}
+                style={{ marginTop:8, fontSize:11, padding:'4px 10px', borderRadius:6, cursor:'pointer',
+                  border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b' }}>
+                🗑 Reset game
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Voting form — shown to everyone if secret is set and not revealed */}
+        {!isRevealed && secretSet && (
+          <>
+            {phase === 'thanks' ? (
+              <div style={{ textAlign:'center', padding:'16px', background:'#dcfce7',
+                borderRadius:10, border:'1px solid #86efac' }}>
+                <p style={{ fontSize:15, fontWeight:700, color:'#166534', margin:0 }}>
+                  ✅ Your vote is recorded!
+                </p>
+                <p style={{ fontSize:12, color:'#6b7280', margin:'4px 0 0' }}>
+                  Results will be revealed by the coordinator.
+                </p>
+              </div>
+            ) : (
+              <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:10, padding:'12px' }}>
+                <p style={{ fontSize:13, fontWeight:600, color:'#111827', margin:'0 0 10px' }}>
+                  🤔 Who is the Sagaunu Amutha? Cast your vote!
+                </p>
+                <div style={{ marginBottom:8 }}>
+                  <label style={{ fontSize:12, color:'#6b7280', display:'block', marginBottom:4 }}>
+                    Your name
+                  </label>
+                  <input value={vName} onChange={e => { setVName(e.target.value); setVErr('') }}
+                    placeholder="Enter your name"
+                    style={{ width:'100%', padding:'8px 10px', borderRadius:7, fontSize:13,
+                      border:'1px solid #d1d5db', outline:'none', boxSizing:'border-box' }} />
+                </div>
+                <div style={{ marginBottom:10 }}>
+                  <label style={{ fontSize:12, color:'#6b7280', display:'block', marginBottom:4 }}>
+                    I think the Sagaunu Amutha is…
+                  </label>
+                  <select value={vGuess} onChange={e => { setVGuess(e.target.value); setVErr('') }}
+                    style={{ width:'100%', padding:'8px 10px', borderRadius:7, fontSize:13,
+                      border:'1px solid #d1d5db', outline:'none', background:'white',
+                      cursor:'pointer', boxSizing:'border-box' }}>
+                    <option value=''>— Select a person —</option>
+                    {allPeople.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                {vErr && <p style={{ fontSize:12, color:'#ef4444', margin:'0 0 8px' }}>{vErr}</p>}
+                <button onClick={submitVote}
+                  style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:14, fontWeight:600,
+                    cursor:'pointer', border:'none', background:'#7e22ce', color:'white' }}>
+                  Submit my vote 🗳️
+                </button>
+                <p style={{ fontSize:11, color:'#9ca3af', textAlign:'center', margin:'6px 0 0' }}>
+                  Votes are recorded once — they cannot be edited after submission.
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {!isRevealed && !secretSet && !gcAuth && (
+          <p style={{ fontSize:13, color:'#9ca3af', textAlign:'center', margin:0, padding:'8px 0' }}>
+            Waiting for coordinator to start this game…
+          </p>
+        )}
+      </div>
+
+      {/* Reset confirm modal */}
+      {resetConfirm && (
+        <PasswordModal title="Reset Sagaunu game?" icon="🗑️" iconBg="#fee2e2"
+          subtitle="This will erase all votes, the secret person, and the winner. Enter coordinator password to confirm."
+          confirmLabel="Reset all data" confirmBg="#991b1b"
+          onConfirm={doReset} onCancel={() => setResetConfirm(false)} />
+      )}
+      {gcPrompt && (
+        <PasswordModal title="Sagaunu Coordinator Login"
+          subtitle="Enter the Sagaunu Amutha game coordinator password."
+          icon="🔮" iconBg="#f3e8ff" confirmLabel="Login" confirmBg="#7e22ce"
+          onConfirm={handleGcLogin} onCancel={() => setGcPrompt(false)} />
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Special Game: Gaslabu Gediye Ata Ganan Kireema
+// ─────────────────────────────────────────────────────────────
+function GaslabuPanel({ onWinnerSet, currentWinner }) {
+  const [data, setData]       = useState(() => lsGet(GASLABU_KEY, { actual:null, guesses:[], closed:false }))
+  const [gcAuth, setGcAuth]   = useState(false)
+  const [gcPrompt, setGcPrompt] = useState(false)
+  const [gName, setGName]     = useState('')
+  const [gCount, setGCount]   = useState('')
+  const [gErr, setGErr]       = useState('')
+  const [phase, setPhase]     = useState('form')
+  const [actualInput, setActualInput] = useState('')
+  const [actualErr, setActualErr]     = useState('')
+  const [resetConfirm, setResetConfirm] = useState(false)
+
+  function persist(next) { setData(next); lsSet(GASLABU_KEY, next) }
+
+  function handleGcLogin(pass, setErr) {
+    if (pass !== GASLABU_GC_PASSWORD) { setErr('Incorrect password.'); return }
+    setGcAuth(true); setGcPrompt(false)
+  }
+
+  function submitGuess() {
+    if (!gName.trim()) { setGErr('Please enter your name.'); return }
+    const n = parseInt(gCount)
+    if (!gCount || isNaN(n) || n < 0 || n > 9999) { setGErr('Please enter a valid seed count (0–9999).'); return }
+    const already = data.guesses.find(g => g.name.trim().toLowerCase() === gName.trim().toLowerCase())
+    if (already) { setGErr('This name already has a guess recorded.'); return }
+    persist({ ...data, guesses: [...data.guesses, { name:gName.trim(), count:n, ts:Date.now() }] })
+    setGName(''); setGCount(''); setPhase('thanks')
+    setTimeout(() => setPhase('form'), 3000)
+  }
+
+  function closeGame() {
+    if (!actualInput || isNaN(parseInt(actualInput))) { setActualErr('Enter the actual seed count.'); return }
+    const actual = parseInt(actualInput)
+    const sorted = data.guesses.slice().sort((a,b) => Math.abs(a.count-actual) - Math.abs(b.count-actual) || a.ts-b.ts)
+    const winner = sorted[0]
+    const closed = { ...data, actual, closed:true }
+    persist(closed)
+    if (winner) {
+      onWinnerSet(`${winner.name} (guessed ${winner.count}, actual: ${actual})`)
+    } else {
+      onWinnerSet('No guesses recorded')
+    }
+    setActualInput(''); setActualErr('')
+  }
+
+  function doReset(pass, setErr) {
+    if (pass !== GASLABU_GC_PASSWORD) { setErr('Incorrect coordinator password.'); return }
+    persist({ actual:null, guesses:[], closed:false })
+    onWinnerSet(null)
+    setResetConfirm(false); setPhase('form')
+  }
+
+  const winner = data.closed && data.guesses.length > 0
+    ? data.guesses.slice().sort((a,b) => Math.abs(a.count-data.actual)-Math.abs(b.count-data.actual)||a.ts-b.ts)[0]
+    : null
+
+  return (
+    <div style={{ border:'1px solid #86efac', borderRadius:12, overflow:'hidden', marginTop:8 }}>
+      <div style={{ padding:'10px 14px', background:'linear-gradient(135deg,#14532d,#15803d)',
+        display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:6 }}>
+        <div>
+          <span style={{ fontSize:13, fontWeight:700, color:'white' }}>🎃 Gaslabu Gediye Ata Ganan Kireema</span>
+          <span style={{ fontSize:11, color:'rgba(255,255,255,0.75)', marginLeft:8 }}>
+            {data.guesses.length} guess{data.guesses.length !== 1 ? 'es' : ''} · {data.closed ? 'Closed' : 'Open'}
+          </span>
+        </div>
+        {gcAuth && (
+          <button onClick={() => setResetConfirm(true)}
+            style={{ fontSize:11, padding:'4px 10px', borderRadius:7, cursor:'pointer',
+              border:'1px solid rgba(255,255,255,0.4)', background:'rgba(255,0,0,0.25)', color:'white', fontWeight:600 }}>
+            🗑 Reset
+          </button>
+        )}
+        {!gcAuth && (
+          <button onClick={() => setGcPrompt(true)}
+            style={{ fontSize:11, padding:'4px 12px', borderRadius:7, cursor:'pointer',
+              border:'1px solid rgba(255,255,255,0.5)', background:'transparent', color:'white', fontWeight:600 }}>
+            🔐 Coordinator login
+          </button>
+        )}
+      </div>
+
+      <div style={{ padding:'12px 14px', background:'#f0fdf4' }}>
+        {/* Results shown after closing */}
+        {data.closed && (
+          <div style={{ background:'#dcfce7', border:'1px solid #86efac', borderRadius:10, padding:'12px', marginBottom:'12px' }}>
+            <p style={{ fontSize:13, fontWeight:700, color:'#166534', margin:'0 0 6px' }}>
+              🏆 Actual seed count: <strong>{data.actual}</strong>
+            </p>
+            {winner && (
+              <p style={{ fontSize:13, color:'#166534', margin:'0 0 10px' }}>
+                Winner: <strong>{winner.name}</strong> — guessed {winner.count}
+                {winner.count === data.actual ? ' (exact!)' : ` (off by ${Math.abs(winner.count - data.actual)})`}
+              </p>
+            )}
+            <div style={{ maxHeight:200, overflowY:'auto' }}>
+              {data.guesses.slice().sort((a,b) => Math.abs(a.count-data.actual)-Math.abs(b.count-data.actual)||a.ts-b.ts).map((g,i) => (
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                  padding:'5px 8px', borderRadius:6, marginBottom:3,
+                  background: i===0 ? '#bbf7d0' : 'white', border: i===0 ? '1px solid #4ade80' : '1px solid #e5e7eb' }}>
+                  <span style={{ fontSize:12 }}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`} <strong>{g.name}</strong> → {g.count}</span>
+                  <span style={{ fontSize:11, color:'#6b7280' }}>
+                    {g.count===data.actual ? 'Exact!' : `±${Math.abs(g.count-data.actual)}`} · {new Date(g.ts).toLocaleTimeString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {gcAuth && (
+              <button onClick={() => setResetConfirm(true)}
+                style={{ marginTop:8, fontSize:11, padding:'4px 10px', borderRadius:6, cursor:'pointer',
+                  border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b' }}>
+                🗑 Reset game
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* GC: close & enter actual */}
+        {gcAuth && !data.closed && (
+          <div style={{ background:'white', border:'1px solid #86efac', borderRadius:10, padding:'12px', marginBottom:'12px' }}>
+            <p style={{ fontSize:12, fontWeight:600, color:'#166534', margin:'0 0 8px' }}>
+              📊 Coordinator: Enter actual seed count to close guessing & pick winner
+            </p>
+            <div style={{ display:'flex', gap:6 }}>
+              <input type="number" value={actualInput} onChange={e => { setActualInput(e.target.value); setActualErr('') }}
+                placeholder="Actual seed count" min={0} max={9999}
+                style={{ flex:1, padding:'7px 10px', borderRadius:7, fontSize:13,
+                  border: actualErr ? '1px solid #ef4444' : '1px solid #d1d5db', outline:'none' }} />
+              <button onClick={closeGame}
+                style={{ padding:'7px 14px', borderRadius:7, fontSize:13, fontWeight:600,
+                  cursor:'pointer', border:'none', background:'#166534', color:'white' }}>
+                Close & pick winner
+              </button>
+            </div>
+            {actualErr && <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{actualErr}</p>}
+            {data.guesses.length > 0 && (
+              <p style={{ fontSize:11, color:'#6b7280', margin:'6px 0 0' }}>
+                Current guesses: {data.guesses.map(g => `${g.name} (${g.count})`).join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Guess form */}
+        {!data.closed && (
+          <>
+            {phase === 'thanks' ? (
+              <div style={{ textAlign:'center', padding:'14px', background:'#dcfce7',
+                borderRadius:10, border:'1px solid #86efac' }}>
+                <p style={{ fontSize:15, fontWeight:700, color:'#166534', margin:0 }}>✅ Guess recorded!</p>
+                <p style={{ fontSize:12, color:'#6b7280', margin:'4px 0 0' }}>Good luck! 🍀</p>
+              </div>
+            ) : (
+              <div style={{ background:'white', border:'1px solid #e5e7eb', borderRadius:10, padding:'12px' }}>
+                <p style={{ fontSize:13, fontWeight:600, color:'#111827', margin:'0 0 10px' }}>
+                  🎃 How many seeds are in the Papaya?
+                </p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+                  <div>
+                    <label style={{ fontSize:12, color:'#6b7280', display:'block', marginBottom:4 }}>Your name</label>
+                    <input value={gName} onChange={e => { setGName(e.target.value); setGErr('') }}
+                      placeholder="Enter your name"
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:7, fontSize:13,
+                        border:'1px solid #d1d5db', outline:'none', boxSizing:'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize:12, color:'#6b7280', display:'block', marginBottom:4 }}>Seed count guess</label>
+                    <input type="number" value={gCount} onChange={e => { setGCount(e.target.value); setGErr('') }}
+                      placeholder="e.g. 247" min={0} max={9999}
+                      style={{ width:'100%', padding:'8px 10px', borderRadius:7, fontSize:13,
+                        border:'1px solid #d1d5db', outline:'none', boxSizing:'border-box' }} />
+                  </div>
+                </div>
+                {gErr && <p style={{ fontSize:12, color:'#ef4444', margin:'0 0 8px' }}>{gErr}</p>}
+                <button onClick={submitGuess}
+                  style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:14, fontWeight:600,
+                    cursor:'pointer', border:'none', background:'#166534', color:'white' }}>
+                  Submit my guess 🎯
+                </button>
+                <p style={{ fontSize:11, color:'#9ca3af', textAlign:'center', margin:'6px 0 0' }}>
+                  One guess per person · Cannot be edited after submission
+                </p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {resetConfirm && (
+        <PasswordModal title="Reset Gaslabu game?" icon="🗑️" iconBg="#fee2e2"
+          subtitle="This will erase all guesses and the winner. Enter coordinator password to confirm."
+          confirmLabel="Reset all data" confirmBg="#991b1b"
+          onConfirm={doReset} onCancel={() => setResetConfirm(false)} />
+      )}
+      {gcPrompt && (
+        <PasswordModal title="Gaslabu Coordinator Login"
+          subtitle="Enter the Gaslabu game coordinator password."
+          icon="🎃" iconBg="#f0fdf4" confirmLabel="Login" confirmBg="#166534"
+          onConfirm={handleGcLogin} onCancel={() => setGcPrompt(false)} />
+      )}
+    </div>
+  )
+}
+
+function loadWinners() {
+  try { const r = localStorage.getItem(WINNERS_STORE_KEY); if (r) return JSON.parse(r) } catch {}
+  return {}
+}
+function saveWinnersStore(w) {
+  try { localStorage.setItem(WINNERS_STORE_KEY, JSON.stringify(w)) } catch {}
+}
+
+// ── shared password modal ──────────────────────────────────────
+function PasswordModal({ title, subtitle, icon, iconBg, confirmLabel, confirmBg, onConfirm, onCancel }) {
+  const [pass, setPass] = useState('')
+  const [err, setErr]   = useState('')
+  return (
+    <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
+      display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1rem' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:14,
+        padding:'1.75rem', width:'100%', maxWidth:380, boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ width:48, height:48, borderRadius:'50%', margin:'0 auto 1rem',
+          display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, background:iconBg }}>
+          {icon}
+        </div>
+        <h3 style={{ fontSize:17, fontWeight:700, textAlign:'center', margin:'0 0 6px', color:'#111827' }}>{title}</h3>
+        <p style={{ fontSize:13, color:'#6b7280', textAlign:'center', margin:'0 0 1.25rem', lineHeight:1.5 }}>{subtitle}</p>
+        <input type="password" value={pass} autoFocus placeholder="Enter password"
+          onChange={e => { setPass(e.target.value); setErr('') }}
+          onKeyDown={e => e.key === 'Enter' && onConfirm(pass, setErr)}
+          style={{ width:'100%', padding:'9px 12px', borderRadius:8, fontSize:14, boxSizing:'border-box',
+            border: err ? '1px solid #ef4444' : '1px solid #d1d5db', outline:'none', marginBottom:6 }} />
+        {err && <p style={{ fontSize:12, color:'#ef4444', margin:'0 0 10px' }}>{err}</p>}
+        <div style={{ display:'flex', gap:8, marginTop:10 }}>
+          <button onClick={onCancel} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14,
+            cursor:'pointer', border:'1px solid #d1d5db', background:'white', color:'#374151', fontWeight:500 }}>
+            Cancel
+          </button>
+          <button onClick={() => onConfirm(pass, setErr)} style={{ flex:1, padding:'10px', borderRadius:8,
+            fontSize:14, cursor:'pointer', border:'none', fontWeight:600, color:'white', background:confirmBg }}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Winner Entry Panel (game-day section) ─────────────────────
+function WinnersPanel({ games, families, winners, persistWinners }) {
+  const [gcAuth, setGcAuth]     = useState(false)
+  const [gcPrompt, setGcPrompt] = useState(false)
+  const [editCell, setEditCell] = useState(null)
+  const [draftName, setDraftName] = useState('')
+  const [delConfirm, setDelConfirm] = useState(null)
+
+  const normalGames = games.filter(g => !SPECIAL_GAMES.includes(g.name))
+  const isGroup     = (name) => GROUP_GAMES.includes(name)
+
+  function persist(next) { persistWinners(next) }
+  function winnerKey(gameName, colKey) { return `${gameName}||${colKey}` }
+  function getWinner(gameName, colKey) { return winners[winnerKey(gameName, colKey)] || null }
+
+  function handleGcLogin(pass, setErr) {
+    if (pass !== GC_PASSWORD) { setErr('Incorrect coordinator password.'); return }
+    setGcAuth(true); setGcPrompt(false)
+  }
+
+  function startEdit(gameName, colKey) {
+    setDraftName(getWinner(gameName, colKey)?.name || '')
+    setEditCell({ game: gameName, colKey })
+  }
+
+  function saveWinner() {
+    if (!draftName.trim()) return
+    const k = winnerKey(editCell.game, editCell.colKey)
+    persist({ ...winners, [k]: { name: draftName.trim(), ts: Date.now() } })
+    setEditCell(null); setDraftName('')
+  }
+
+  function deleteWinner(gameName, colKey) {
+    const k = winnerKey(gameName, colKey)
+    const next = { ...winners }; delete next[k]; persist(next)
+    setDelConfirm(null)
+  }
+
+  const totalPossible = normalGames.reduce((s,g) => s + COLS.filter(c => g[c.key]).length, 0)
+  const totalEntered  = Object.keys(winners).length
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ borderRadius:12, overflow:'hidden', border:'1px solid #e5e7eb',
+        boxShadow:'0 1px 4px rgba(0,0,0,0.06)', marginBottom:'1.25rem' }}>
+        <div style={{ background:'linear-gradient(135deg,#92400e,#d97706)', padding:'12px 16px',
+          display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
+          <div>
+            <div style={{ fontSize:14, fontWeight:700, color:'white' }}>🏅 Winner Entry — Game Coordinator</div>
+            <div style={{ fontSize:12, color:'rgba(255,255,255,0.8)', marginTop:2 }}>
+              {totalEntered} of {totalPossible} slots filled
+            </div>
+          </div>
+          {!gcAuth
+            ? <button onClick={() => setGcPrompt(true)}
+                style={{ padding:'6px 14px', borderRadius:8, fontSize:12, fontWeight:600,
+                  cursor:'pointer', border:'1px solid rgba(255,255,255,0.5)',
+                  background:'transparent', color:'white' }}>
+                🔐 Coordinator login
+              </button>
+            : <span style={{ fontSize:12, background:'rgba(255,255,255,0.2)', color:'white',
+                padding:'5px 12px', borderRadius:8, fontWeight:600 }}>✓ Coordinator active</span>
+          }
+        </div>
+        <div style={{ height:4, background:'#fef3c7' }}>
+          <div style={{ height:'100%', background:'#d97706', borderRadius:2,
+            width: totalPossible ? `${Math.round(totalEntered/totalPossible*100)}%` : '0%',
+            transition:'width 0.4s' }} />
+        </div>
+      </div>
+
+      {!gcAuth && (
+        <div style={{ padding:'12px 16px', background:'#fffbeb', border:'1px solid #fcd34d',
+          borderRadius:10, fontSize:13, color:'#92400e', marginBottom:'1rem' }}>
+          Login as Game Coordinator above to add or edit winners. Everyone can view the board in the 🏆 Board tab.
+        </div>
+      )}
+
+      {/* Game cards */}
+      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        {normalGames.map(g => {
+          const eligibleCols = COLS.filter(c => g[c.key])
+          const filled = eligibleCols.filter(c => getWinner(g.name, c.key)).length
+          const grp = isGroup(g.name)
+          return (
+            <div key={g.name} style={{ borderRadius:12, border: grp ? '1px solid #d8b4fe' : '1px solid #e5e7eb',
+              overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+              <div style={{ padding:'10px 14px',
+                background: grp ? '#f5f3ff' : (filled===eligibleCols.length && filled>0 ? '#f0fdf4' : '#f9fafb'),
+                borderBottom:'1px solid #e5e7eb', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div>
+                  <span style={{ fontSize:13, fontWeight:600, color:'#111827' }}>{g.name}</span>
+                  {grp && <span style={{ fontSize:10, marginLeft:6, padding:'1px 6px', borderRadius:5,
+                    background:'#ede9fe', color:'#6b21a8', fontWeight:600 }}>GROUP — enter winning captain</span>}
+                </div>
+                <span style={{ fontSize:11, padding:'2px 8px', borderRadius:10, fontWeight:600,
+                  background: filled===eligibleCols.length&&filled>0 ? '#dcfce7' : filled>0 ? '#fef3c7' : '#f3f4f6',
+                  color:      filled===eligibleCols.length&&filled>0 ? '#166534' : filled>0 ? '#92400e' : '#6b7280' }}>
+                  {filled}/{eligibleCols.length} filled
+                </span>
+              </div>
+              <div style={{ padding:'10px 12px', display:'flex', flexDirection:'column', gap:7 }}>
+                {eligibleCols.map(c => {
+                  const w = getWinner(g.name, c.key)
+                  const isEditing = editCell?.game===g.name && editCell?.colKey===c.key
+                  return (
+                    <div key={c.key} style={{ display:'flex', alignItems:'center', gap:8,
+                      padding:'8px 10px', borderRadius:8, border:`1px solid ${w ? c.border : '#e5e7eb'}`,
+                      background: w ? c.bg : 'white' }}>
+                      <span style={{ fontSize:11, padding:'2px 8px', borderRadius:6, fontWeight:600,
+                        background:c.bg, color:c.text, border:`1px solid ${c.border}`,
+                        whiteSpace:'nowrap', flexShrink:0 }}>{c.label.replace('\n',' ')}</span>
+                      {isEditing ? (
+                        <div style={{ display:'flex', flex:1, gap:6, alignItems:'center' }}>
+                          <input value={draftName} onChange={e => setDraftName(e.target.value)}
+                            onKeyDown={e => { if(e.key==='Enter') saveWinner(); if(e.key==='Escape') setEditCell(null) }}
+                            autoFocus placeholder={grp ? 'Winning team captain…' : 'Winner name…'}
+                            style={{ flex:1, padding:'5px 9px', borderRadius:7, fontSize:13,
+                              border:'1px solid #93c5fd', outline:'none' }} />
+                          <button onClick={saveWinner}
+                            style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600,
+                              cursor:'pointer', border:'none', background:'#166534', color:'white' }}>Save</button>
+                          <button onClick={() => setEditCell(null)}
+                            style={{ padding:'5px 10px', borderRadius:7, fontSize:12,
+                              cursor:'pointer', border:'1px solid #d1d5db', background:'white', color:'#6b7280' }}>✕</button>
+                        </div>
+                      ) : w ? (
+                        <div style={{ display:'flex', flex:1, justifyContent:'space-between', alignItems:'center' }}>
+                          <span style={{ fontSize:13, fontWeight:600, color:'#111827' }}>
+                            {grp ? '🏅' : '🥇'} {w.name}
+                          </span>
+                          {gcAuth && (
+                            <div style={{ display:'flex', gap:5 }}>
+                              <button onClick={() => startEdit(g.name, c.key)}
+                                style={{ fontSize:11, padding:'3px 9px', borderRadius:6, cursor:'pointer',
+                                  border:'1px solid #93c5fd', background:'#dbeafe', color:'#1e40af', fontWeight:500 }}>Edit</button>
+                              <button onClick={() => setDelConfirm({ game:g.name, colKey:c.key })}
+                                style={{ fontSize:11, padding:'3px 9px', borderRadius:6, cursor:'pointer',
+                                  border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b', fontWeight:500 }}>✕</button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ display:'flex', flex:1, justifyContent:'space-between', alignItems:'center' }}>
+                          <span style={{ fontSize:12, color:'#9ca3af', fontStyle:'italic' }}>No winner yet</span>
+                          {gcAuth && (
+                            <button onClick={() => startEdit(g.name, c.key)}
+                              style={{ fontSize:11, padding:'4px 12px', borderRadius:6, cursor:'pointer',
+                                border:'1px solid #86efac', background:'#dcfce7', color:'#166534', fontWeight:600 }}>
+                              + Add {grp ? 'winning captain' : 'winner'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* GC login modal */}
+      {gcPrompt && (
+        <PasswordModal title="Game Coordinator Login"
+          subtitle="Enter the coordinator password to add or edit winners."
+          icon="🏅" iconBg="#fef3c7" confirmLabel="Login" confirmBg="#d97706"
+          onConfirm={handleGcLogin} onCancel={() => setGcPrompt(false)} />
+      )}
+
+      {/* Delete winner confirm */}
+      {delConfirm && (
+        <div onClick={() => setDelConfirm(null)} style={{ position:'fixed', inset:0,
+          background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center',
+          justifyContent:'center', zIndex:1000, padding:'1rem' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:14,
+            padding:'1.75rem', width:'100%', maxWidth:360, boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ width:44, height:44, borderRadius:'50%', margin:'0 auto 1rem',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:20, background:'#fee2e2' }}>🗑️</div>
+            <h3 style={{ fontSize:16, fontWeight:700, textAlign:'center', margin:'0 0 8px', color:'#111827' }}>Remove winner?</h3>
+            <p style={{ fontSize:13, color:'#6b7280', textAlign:'center', margin:'0 0 1.25rem', lineHeight:1.5 }}>
+              Remove <strong>{getWinner(delConfirm.game, delConfirm.colKey)?.name}</strong> from{' '}
+              <strong>{delConfirm.game}</strong>?
+            </p>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={() => setDelConfirm(null)} style={{ flex:1, padding:'10px', borderRadius:8,
+                fontSize:14, cursor:'pointer', border:'1px solid #d1d5db', background:'white', color:'#374151' }}>
+                Cancel
+              </button>
+              <button onClick={() => deleteWinner(delConfirm.game, delConfirm.colKey)}
+                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, fontWeight:600,
+                  cursor:'pointer', border:'none', color:'white', background:'#991b1b' }}>
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Winners Board — public read-only view grouped by category
+// ─────────────────────────────────────────────────────────────
+function WinnersBoard({ games, winners }) {
+  function getWinner(gameName, colKey) { return winners[`${gameName}||${colKey}`] || null }
+
+  const boardByCat = COLS.map(c => ({
+    ...c,
+    entries: games.filter(g => g[c.key]).map(g => ({ game: g.name, winner: getWinner(g.name, c.key) }))
+  }))
+
+  const totalWinners = Object.keys(winners).length
+  const totalSlots   = games.reduce((s,g) => s + COLS.filter(c => g[c.key]).length, 0)
+
+  return (
+    <div>
+      <div style={{ marginBottom:'1.25rem', padding:'12px 16px',
+        background:'linear-gradient(135deg,#166534,#15803d)', borderRadius:12,
+        display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <div>
+          <div style={{ fontSize:14, fontWeight:700, color:'white' }}>🏆 Winners Board</div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,0.8)', marginTop:2 }}>
+            {totalWinners} of {totalSlots} winners announced
+          </div>
+        </div>
+        <div style={{ fontSize:22, fontWeight:700, color:'#fbbf24' }}>
+          {totalSlots > 0 ? Math.round(totalWinners/totalSlots*100) : 0}%
+        </div>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        {boardByCat.map(cat => {
+          if (cat.entries.length === 0) return null
+          const filled = cat.entries.filter(e => e.winner).length
+          return (
+            <div key={cat.key} style={{ borderRadius:12, border:`1px solid ${cat.border}`,
+              overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,0.05)' }}>
+              <div style={{ padding:'10px 16px', background:cat.bg, display:'flex',
+                justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontSize:14, fontWeight:700, color:cat.text }}>{cat.label.replace('\n',' ')}</span>
+                <span style={{ fontSize:12, color:cat.text, opacity:0.8 }}>{filled}/{cat.entries.length} winners</span>
+              </div>
+              <div style={{ background:'white' }}>
+                {cat.entries.map((e,i) => (
+                  <div key={e.game} style={{ padding:'10px 16px', display:'flex',
+                    justifyContent:'space-between', alignItems:'center',
+                    borderBottom: i<cat.entries.length-1 ? '1px solid #f3f4f6' : 'none',
+                    background: e.winner ? 'white' : '#fafafa' }}>
+                    <div>
+                      <span style={{ fontSize:13, color:'#374151' }}>{e.game}</span>
+                      {GROUP_GAMES.includes(e.game) && (
+                        <span style={{ fontSize:10, marginLeft:6, color:'#9ca3af' }}>team captain</span>
+                      )}
+                      {SPECIAL_GAMES.includes(e.game) && (
+                        <span style={{ fontSize:10, marginLeft:6, color:'#7e22ce' }}>★ special</span>
+                      )}
+                    </div>
+                    {e.winner
+                      ? <span style={{ fontSize:13, fontWeight:700, color:'#166534' }}>🥇 {e.winner.name}</span>
+                      : <span style={{ fontSize:12, color:'#d1d5db', fontStyle:'italic' }}>TBD</span>
+                    }
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Games sub-pages rendered inside GamesPage
+// ─────────────────────────────────────────────────────────────
+const GAME_TABS = [
+  { id:'table',   label:'📋 Games',       title:'Games List' },
+  { id:'winners', label:'🏅 Winners',      title:'Winner Entry' },
+  { id:'special', label:'🔮 Special',      title:'Special Games' },
+  { id:'board',   label:'🏆 Board',        title:'Winners Board' },
+]
+
 function GamesPage() {
   const [games, setGames]           = useState(loadGames)
-  const [modModal, setModModal]     = useState(null) // 'edit' | 'delete' | 'add'
-  const [modTarget, setModTarget]   = useState(null) // index
-  const [modPass, setModPass]       = useState('')
-  const [modErr, setModErr]         = useState('')
-
-  // Edit/Add form state
-  const [editMode, setEditMode]     = useState(null) // { type:'add'|'edit', idx?:number }
+  const [families, setFamilies]     = useState([])
+  const [subPage, setSubPage]       = useState('table')
+  const [modModal, setModModal]     = useState(null)
+  const [modTarget, setModTarget]   = useState(null)
+  const [editMode, setEditMode]     = useState(null)
   const [formName, setFormName]     = useState('')
   const [formCols, setFormCols]     = useState({})
   const [formErr, setFormErr]       = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
+  // shared winner state (lifted so board + entry stay in sync)
+  const [winners, setWinners]       = useState(loadWinners)
 
-  function persist(next) { setGames(next); saveGames(next) }
+  function persistGames(next) { setGames(next); saveGames(next) }
+  function persistWinners(next) { setWinners(next); saveWinnersStore(next) }
 
-  function openModModal(type, idx = null) {
-    setModTarget(idx)
-    setModModal(type)
-    setModPass(''); setModErr('')
-  }
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'families'), snap => {
+      setFamilies(snap.docs.map(d => ({ id:d.id, ...d.data() })))
+    })
+    return unsub
+  }, [])
 
-  function confirmMod() {
-    if (modPass !== MOD_PASSWORD) { setModErr('Incorrect password.'); return }
+  function openModModal(type, idx = null) { setModTarget(idx); setModModal(type) }
+
+  function confirmMod(pass, setErr) {
+    if (pass !== MOD_PASSWORD) { setErr('Incorrect password.'); return }
     if (modModal === 'delete') {
-      setDeleteTarget(modTarget)
-      setModModal(null)
+      setDeleteTarget(modTarget); setModModal(null)
     } else if (modModal === 'edit') {
       const g = games[modTarget]
       setFormName(g.name)
       const cols = {}; COLS.forEach(c => { cols[c.key] = g[c.key] || false }); setFormCols(cols)
-      setEditMode({ type:'edit', idx: modTarget })
-      setModModal(null)
+      setEditMode({ type:'edit', idx: modTarget }); setModModal(null)
     } else if (modModal === 'add') {
       setFormName('')
       const cols = {}; COLS.forEach(c => { cols[c.key] = false }); setFormCols(cols)
-      setEditMode({ type:'add' })
-      setModModal(null)
+      setEditMode({ type:'add' }); setModModal(null)
     }
   }
 
   function saveForm() {
     if (!formName.trim()) { setFormErr('Game name is required.'); return }
     const entry = { name: formName.trim(), ...formCols }
-    if (editMode.type === 'add') {
-      persist([...games, entry])
-    } else {
-      persist(games.map((g, i) => i === editMode.idx ? entry : g))
-    }
+    if (editMode.type === 'add') persistGames([...games, entry])
+    else persistGames(games.map((g, i) => i === editMode.idx ? entry : g))
     setEditMode(null); setFormErr('')
   }
 
   function confirmDelete() {
-    persist(games.filter((_, i) => i !== deleteTarget))
+    persistGames(games.filter((_, i) => i !== deleteTarget))
     setDeleteTarget(null)
   }
 
-  // Summary: count winners per category
   const summary = COLS.map(c => ({
     ...c,
     winners: games.reduce((sum, g) => sum + (g[c.key] ? 1 : 0), 0),
   }))
 
-  return (
-    <div style={{ maxWidth:780, margin:'0 auto', padding:'0 1rem 3rem' }}>
-      <div style={{ paddingTop:'1.5rem', marginBottom:'1.5rem', display:'flex',
-        justifyContent:'space-between', alignItems:'center' }}>
-        <div>
-          <h2 style={{ fontSize:20, fontWeight:700, margin:'0 0 4px', color:'#111827' }}>
-            🏆 Aurudu Games
-          </h2>
-          <p style={{ fontSize:13, color:'#6b7280', margin:0 }}>
-            Each ✓ means 1 winner is selected for that category in that game.
-          </p>
-        </div>
-        <button onClick={() => openModModal('add')}
-          style={{ padding:'8px 16px', borderRadius:8, fontSize:13, fontWeight:600,
-            cursor:'pointer', border:'none', background:'#166534', color:'white', whiteSpace:'nowrap' }}>
-          + Add game
+  // Sub-nav bar
+  const SubNav = () => (
+    <div style={{ display:'flex', gap:3, overflowX:'auto', marginBottom:'1.5rem',
+      background:'white', borderRadius:12, border:'1px solid #e5e7eb', padding:4,
+      boxShadow:'0 1px 3px rgba(0,0,0,0.05)' }}>
+      {GAME_TABS.map(t => (
+        <button key={t.id} onClick={() => setSubPage(t.id)}
+          style={{ flex:1, padding:'9px 10px', borderRadius:9, fontSize:12, fontWeight:600,
+            cursor:'pointer', border:'none', whiteSpace:'nowrap', transition:'all 0.15s',
+            background: subPage===t.id ? '#166534' : 'transparent',
+            color: subPage===t.id ? 'white' : '#6b7280' }}>
+          {t.label}
         </button>
+      ))}
+    </div>
+  )
+
+  return (
+    <div style={{ maxWidth:800, margin:'0 auto', padding:'0 1rem 3rem' }}>
+      <div style={{ paddingTop:'1.5rem', marginBottom:'1.25rem' }}>
+        <h2 style={{ fontSize:20, fontWeight:700, margin:'0 0 4px', color:'#111827' }}>🏆 Aurudu Games</h2>
+        <p style={{ fontSize:13, color:'#6b7280', margin:0 }}>Manage games, record winners, and track results.</p>
       </div>
 
-      {/* Games table */}
-      <div style={{ overflowX:'auto', marginBottom:'2rem', borderRadius:12,
-        border:'1px solid #e5e7eb', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:600 }}>
-          <thead>
-            <tr style={{ background:'#166534' }}>
-              <th style={{ padding:'10px 14px', textAlign:'left', color:'white',
-                fontWeight:600, borderBottom:'1px solid #15803d', minWidth:180 }}>Game</th>
-              {COLS.map(c => (
-                <th key={c.key} style={{ padding:'8px 10px', textAlign:'center', color:'white',
-                  fontWeight:600, borderBottom:'1px solid #15803d', whiteSpace:'pre-line',
-                  fontSize:11, lineHeight:1.3, minWidth:62 }}>{c.label}</th>
-              ))}
-              <th style={{ padding:'8px 10px', textAlign:'center', color:'white',
-                fontWeight:600, borderBottom:'1px solid #15803d', minWidth:90 }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {games.map((g, i) => (
-              <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#f8fafc',
-                borderBottom:'0.5px solid #e5e7eb' }}>
-                <td style={{ padding:'9px 14px', color:'#111827', fontWeight:500 }}>{g.name}</td>
-                {COLS.map(c => (
-                  <td key={c.key} style={{ padding:'9px 10px', textAlign:'center' }}>
-                    {g[c.key]
-                      ? <span style={{ display:'inline-block', width:22, height:22,
-                          borderRadius:6, background:c.bg, border:`1px solid ${c.border}`,
-                          lineHeight:'22px', fontSize:13, color:c.text, fontWeight:700 }}>✓</span>
-                      : <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>
-                    }
-                  </td>
+      <SubNav />
+
+      {/* ── TAB: Games Table ─────────────────────────────────── */}
+      {subPage === 'table' && (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
+            <p style={{ fontSize:13, color:'#6b7280', margin:0 }}>Each ✓ = 1 winner for that category. Moderator password required to edit.</p>
+            <button onClick={() => openModModal('add')}
+              style={{ padding:'8px 16px', borderRadius:8, fontSize:13, fontWeight:600,
+                cursor:'pointer', border:'none', background:'#166534', color:'white', whiteSpace:'nowrap' }}>
+              + Add game
+            </button>
+          </div>
+          <div style={{ overflowX:'auto', marginBottom:'2rem', borderRadius:12,
+            border:'1px solid #e5e7eb', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:600 }}>
+              <thead>
+                <tr style={{ background:'#166534' }}>
+                  <th style={{ padding:'10px 14px', textAlign:'left', color:'white',
+                    fontWeight:600, borderBottom:'1px solid #15803d', minWidth:180 }}>Game</th>
+                  {COLS.map(c => (
+                    <th key={c.key} style={{ padding:'8px 10px', textAlign:'center', color:'white',
+                      fontWeight:600, borderBottom:'1px solid #15803d', whiteSpace:'pre-line',
+                      fontSize:11, lineHeight:1.3, minWidth:62 }}>{c.label}</th>
+                  ))}
+                  <th style={{ padding:'8px 10px', textAlign:'center', color:'white',
+                    fontWeight:600, borderBottom:'1px solid #15803d', minWidth:90 }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {games.map((g, i) => (
+                  <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#f8fafc',
+                    borderBottom:'0.5px solid #e5e7eb' }}>
+                    <td style={{ padding:'9px 14px', color:'#111827', fontWeight:500 }}>
+                      {SPECIAL_GAMES.includes(g.name)
+                        ? <span>{g.name} <span style={{ fontSize:10, color:'#7e22ce', marginLeft:4, fontWeight:600 }}>★ special</span></span>
+                        : GROUP_GAMES.includes(g.name)
+                        ? <span>{g.name} <span style={{ fontSize:10, color:'#6b21a8', marginLeft:4 }}>group</span></span>
+                        : g.name}
+                    </td>
+                    {COLS.map(c => (
+                      <td key={c.key} style={{ padding:'9px 10px', textAlign:'center' }}>
+                        {g[c.key]
+                          ? <span style={{ display:'inline-block', width:22, height:22,
+                              borderRadius:6, background:c.bg, border:`1px solid ${c.border}`,
+                              lineHeight:'22px', fontSize:13, color:c.text, fontWeight:700 }}>✓</span>
+                          : <span style={{ color:'#d1d5db', fontSize:14 }}>—</span>
+                        }
+                      </td>
+                    ))}
+                    <td style={{ padding:'9px 10px', textAlign:'center' }}>
+                      <div style={{ display:'flex', gap:5, justifyContent:'center' }}>
+                        <button onClick={() => openModModal('edit', i)}
+                          style={{ fontSize:11, padding:'3px 9px', borderRadius:6, cursor:'pointer',
+                            border:'1px solid #93c5fd', background:'#dbeafe', color:'#1e40af', fontWeight:500 }}>
+                          Edit
+                        </button>
+                        <button onClick={() => openModModal('delete', i)}
+                          style={{ fontSize:11, padding:'3px 9px', borderRadius:6, cursor:'pointer',
+                            border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b', fontWeight:500 }}>
+                          Del
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 ))}
-                <td style={{ padding:'9px 10px', textAlign:'center' }}>
-                  <div style={{ display:'flex', gap:5, justifyContent:'center' }}>
-                    <button onClick={() => openModModal('edit', i)}
-                      style={{ fontSize:11, padding:'3px 9px', borderRadius:6, cursor:'pointer',
-                        border:'1px solid #93c5fd', background:'#dbeafe', color:'#1e40af', fontWeight:500 }}>
-                      Edit
-                    </button>
-                    <button onClick={() => openModModal('delete', i)}
-                      style={{ fontSize:11, padding:'3px 9px', borderRadius:6, cursor:'pointer',
-                        border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b', fontWeight:500 }}>
-                      Del
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              </tbody>
+            </table>
+          </div>
 
-      {/* Winners Summary */}
-      <div style={{ marginBottom:'2rem', borderRadius:12, border:'1px solid #e5e7eb',
-        overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
-        <div style={{ padding:'10px 16px', background:'#166534' }}>
-          <span style={{ fontSize:12, fontWeight:700, color:'white',
-            textTransform:'uppercase', letterSpacing:'0.07em' }}>🏅 Winners summary</span>
-        </div>
-        <div style={{ padding:'12px 16px', background:'#f9fafb',
-          fontSize:12, color:'#6b7280', borderBottom:'1px solid #e5e7eb' }}>
-          Total winners = 1 winner per ✓ per game. Group games = 1 winning group.
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:0 }}>
-          {summary.map((s, i) => (
-            <div key={s.key} style={{ padding:'14px 16px', textAlign:'center',
-              background:s.bg, borderBottom:'1px solid #e5e7eb',
-              borderRight: i % 3 !== 2 ? '1px solid #e5e7eb' : 'none' }}>
-              <p style={{ fontSize:24, fontWeight:700, color:s.text, margin:'0 0 4px' }}>{s.winners}</p>
-              <p style={{ fontSize:11, color:s.text, margin:0, opacity:0.8,
-                whiteSpace:'pre-line', lineHeight:1.3 }}>{s.label} winners</p>
+          {/* Winner count summary */}
+          <div style={{ borderRadius:12, border:'1px solid #e5e7eb', overflow:'hidden',
+            boxShadow:'0 1px 4px rgba(0,0,0,0.05)' }}>
+            <div style={{ padding:'10px 16px', background:'#166534' }}>
+              <span style={{ fontSize:12, fontWeight:700, color:'white',
+                textTransform:'uppercase', letterSpacing:'0.07em' }}>🏅 Possible winners per category</span>
             </div>
-          ))}
-        </div>
-        <div style={{ padding:'12px 16px', background:'white', borderTop:'1px solid #e5e7eb',
-          fontSize:13, color:'#374151' }}>
-          <strong style={{ color:'#111827' }}>Total winners across all categories: </strong>
-          <span style={{ fontSize:16, fontWeight:700, color:'#166534' }}>
-            {summary.reduce((s, c) => s + c.winners, 0)}
-          </span>
-        </div>
-      </div>
-
-      <Footer />
-
-      {/* Moderator password modal */}
-      {modModal && (
-        <div onClick={() => setModModal(null)}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
-            display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1rem' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background:'white', borderRadius:14, padding:'1.75rem',
-              width:'100%', maxWidth:380, boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
-            <div style={{ width:48, height:48, borderRadius:'50%', margin:'0 auto 1rem',
-              display:'flex', alignItems:'center', justifyContent:'center', fontSize:22,
-              background: modModal === 'delete' ? '#fee2e2' : '#dbeafe' }}>
-              {modModal === 'delete' ? '🗑️' : modModal === 'add' ? '➕' : '✏️'}
+            <div style={{ padding:'10px 16px', background:'#f9fafb',
+              fontSize:12, color:'#6b7280', borderBottom:'1px solid #e5e7eb' }}>
+              1 winner per ✓ per game. Group games = 1 winning team. Special games = 1 winner each.
             </div>
-            <h3 style={{ fontSize:17, fontWeight:700, textAlign:'center', margin:'0 0 6px', color:'#111827' }}>
-              Moderator access required
-            </h3>
-            <p style={{ fontSize:13, color:'#6b7280', textAlign:'center', margin:'0 0 1.25rem' }}>
-              {modModal === 'delete' ? 'Enter the moderator password to delete this game.'
-                : modModal === 'add' ? 'Enter the moderator password to add a new game.'
-                : 'Enter the moderator password to edit this game.'}
-            </p>
-            <div style={{ marginBottom:'1rem' }}>
-              <input type="password" value={modPass}
-                onChange={e => { setModPass(e.target.value); setModErr('') }}
-                onKeyDown={e => e.key === 'Enter' && confirmMod()}
-                placeholder="Moderator password" autoFocus
-                style={{ width:'100%', padding:'9px 12px', borderRadius:8, fontSize:14,
-                  border: modErr ? '1px solid #ef4444' : '1px solid #d1d5db',
-                  outline:'none', boxSizing:'border-box' }} />
-              {modErr && <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{modErr}</p>}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:0 }}>
+              {summary.map((s, i) => (
+                <div key={s.key} style={{ padding:'14px 16px', textAlign:'center',
+                  background:s.bg, borderBottom:'1px solid #e5e7eb',
+                  borderRight: i % 3 !== 2 ? '1px solid #e5e7eb' : 'none' }}>
+                  <p style={{ fontSize:24, fontWeight:700, color:s.text, margin:'0 0 4px' }}>{s.winners}</p>
+                  <p style={{ fontSize:11, color:s.text, margin:0, opacity:0.8,
+                    whiteSpace:'pre-line', lineHeight:1.3 }}>{s.label}</p>
+                </div>
+              ))}
             </div>
-            <div style={{ display:'flex', gap:8 }}>
-              <button onClick={() => setModModal(null)}
-                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, cursor:'pointer',
-                  border:'1px solid #d1d5db', background:'white', color:'#374151', fontWeight:500 }}>
-                Cancel
-              </button>
-              <button onClick={confirmMod}
-                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, cursor:'pointer',
-                  border:'none', fontWeight:600, color:'white',
-                  background: modModal === 'delete' ? '#991b1b' : '#166534' }}>
-                Continue
-              </button>
+            <div style={{ padding:'12px 16px', background:'white', borderTop:'1px solid #e5e7eb', fontSize:13, color:'#374151' }}>
+              <strong style={{ color:'#111827' }}>Total: </strong>
+              <span style={{ fontSize:16, fontWeight:700, color:'#166534' }}>
+                {summary.reduce((s, c) => s + c.winners, 0)}
+              </span>
+              <span style={{ color:'#6b7280', fontSize:13 }}> possible winners</span>
             </div>
           </div>
+
+          <div style={{ marginTop:'2rem' }}><Footer /></div>
         </div>
       )}
 
-      {/* Edit / Add form modal */}
+      {/* ── TAB: Winner Entry ─────────────────────────────────── */}
+      {subPage === 'winners' && (
+        <div>
+          <WinnersPanel games={games} families={families}
+            winners={winners} persistWinners={persistWinners} />
+          <div style={{ marginTop:'2rem' }}><Footer /></div>
+        </div>
+      )}
+
+      {/* ── TAB: Special Games ────────────────────────────────── */}
+      {subPage === 'special' && (
+        <div>
+          <div style={{ marginBottom:'1rem', padding:'12px 16px', background:'#faf5ff',
+            border:'1px solid #d8b4fe', borderRadius:12, fontSize:13, color:'#6b21a8' }}>
+            <strong>Special games</strong> have unique rules — voters guess directly, coordinators reveal results and winners are auto-calculated.
+            Each game has its own separate coordinator password.
+          </div>
+          <SagaunuPanel families={families}
+            currentWinner={winners['Sagaunu Amutha Thereema||adultsCommon']?.name}
+            onWinnerSet={name => {
+              const k = 'Sagaunu Amutha Thereema||adultsCommon'
+              if (!name) { const n={...winners}; delete n[k]; persistWinners(n) }
+              else persistWinners({...winners, [k]:{ name, ts:Date.now() }})
+            }} />
+          <div style={{ marginTop:'1.5rem' }}>
+            <GaslabuPanel
+              currentWinner={winners['Gaslabu Gediye Ata Ganan Kireema||adultsCommon']?.name}
+              onWinnerSet={name => {
+                const k = 'Gaslabu Gediye Ata Ganan Kireema||adultsCommon'
+                if (!name) { const n={...winners}; delete n[k]; persistWinners(n) }
+                else persistWinners({...winners, [k]:{ name, ts:Date.now() }})
+              }} />
+          </div>
+          <div style={{ marginTop:'2rem' }}><Footer /></div>
+        </div>
+      )}
+
+      {/* ── TAB: Winners Board ────────────────────────────────── */}
+      {subPage === 'board' && (
+        <div>
+          <WinnersBoard games={games} winners={winners} />
+          <div style={{ marginTop:'2rem' }}><Footer /></div>
+        </div>
+      )}
+
+      {/* Moderator password modal */}
+      {modModal && (
+        <PasswordModal
+          title="Moderator access required"
+          subtitle={modModal === 'delete' ? 'Enter the moderator password to delete this game.'
+            : modModal === 'add' ? 'Enter the moderator password to add a new game.'
+            : 'Enter the moderator password to edit this game.'}
+          icon={modModal === 'delete' ? '🗑️' : modModal === 'add' ? '➕' : '✏️'}
+          iconBg={modModal === 'delete' ? '#fee2e2' : '#dbeafe'}
+          confirmLabel="Continue"
+          confirmBg={modModal === 'delete' ? '#991b1b' : '#166534'}
+          onConfirm={confirmMod}
+          onCancel={() => setModModal(null)}
+        />
+      )}
+
+      {/* Edit / Add game form */}
       {editMode && (
-        <div onClick={() => setEditMode(null)}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
-            display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1rem' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background:'white', borderRadius:14, padding:'1.75rem',
-              width:'100%', maxWidth:480, boxShadow:'0 20px 60px rgba(0,0,0,0.2)',
-              maxHeight:'90vh', overflowY:'auto' }}>
+        <div onClick={() => setEditMode(null)} style={{ position:'fixed', inset:0,
+          background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center',
+          justifyContent:'center', zIndex:1000, padding:'1rem' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:14,
+            padding:'1.75rem', width:'100%', maxWidth:480, boxShadow:'0 20px 60px rgba(0,0,0,0.2)',
+            maxHeight:'90vh', overflowY:'auto' }}>
             <h3 style={{ fontSize:16, fontWeight:700, margin:'0 0 1.25rem', color:'#111827' }}>
               {editMode.type === 'add' ? 'Add new game' : 'Edit game'}
             </h3>
@@ -1424,14 +2265,12 @@ function GamesPage() {
             </div>
             {formErr && <p style={{ fontSize:12, color:'#ef4444', marginBottom:'1rem' }}>{formErr}</p>}
             <div style={{ display:'flex', gap:8 }}>
-              <button onClick={saveForm}
-                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, fontWeight:600,
-                  cursor:'pointer', border:'none', background:'#166534', color:'white' }}>
+              <button onClick={saveForm} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14,
+                fontWeight:600, cursor:'pointer', border:'none', background:'#166534', color:'white' }}>
                 {editMode.type === 'add' ? 'Add game' : 'Save changes'}
               </button>
-              <button onClick={() => setEditMode(null)}
-                style={{ padding:'10px 16px', borderRadius:8, fontSize:14, cursor:'pointer',
-                  border:'1px solid #d1d5db', background:'transparent', color:'#6b7280' }}>
+              <button onClick={() => setEditMode(null)} style={{ padding:'10px 16px', borderRadius:8,
+                fontSize:14, cursor:'pointer', border:'1px solid #d1d5db', background:'transparent', color:'#6b7280' }}>
                 Cancel
               </button>
             </div>
@@ -1439,33 +2278,26 @@ function GamesPage() {
         </div>
       )}
 
-      {/* Delete confirm modal */}
+      {/* Delete game confirm */}
       {deleteTarget !== null && (
-        <div onClick={() => setDeleteTarget(null)}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)',
-            display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'1rem' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background:'white', borderRadius:14, padding:'1.75rem',
-              width:'100%', maxWidth:380, boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div onClick={() => setDeleteTarget(null)} style={{ position:'fixed', inset:0,
+          background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center',
+          justifyContent:'center', zIndex:1000, padding:'1rem' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'white', borderRadius:14,
+            padding:'1.75rem', width:'100%', maxWidth:380, boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
             <div style={{ width:48, height:48, borderRadius:'50%', margin:'0 auto 1rem',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              fontSize:22, background:'#fee2e2' }}>🗑️</div>
-            <h3 style={{ fontSize:17, fontWeight:700, textAlign:'center', margin:'0 0 6px', color:'#111827' }}>
-              Delete game?
-            </h3>
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, background:'#fee2e2' }}>🗑️</div>
+            <h3 style={{ fontSize:17, fontWeight:700, textAlign:'center', margin:'0 0 6px', color:'#111827' }}>Delete game?</h3>
             <p style={{ fontSize:13, color:'#6b7280', textAlign:'center', margin:'0 0 1.5rem', lineHeight:1.6 }}>
-              You are about to remove <strong style={{ color:'#111827' }}>{games[deleteTarget]?.name}</strong>.<br />
-              This cannot be undone.
+              Remove <strong style={{ color:'#111827' }}>{games[deleteTarget]?.name}</strong>? This cannot be undone.
             </p>
             <div style={{ display:'flex', gap:8 }}>
-              <button onClick={() => setDeleteTarget(null)}
-                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, cursor:'pointer',
-                  border:'1px solid #d1d5db', background:'white', color:'#374151', fontWeight:500 }}>
+              <button onClick={() => setDeleteTarget(null)} style={{ flex:1, padding:'10px', borderRadius:8,
+                fontSize:14, cursor:'pointer', border:'1px solid #d1d5db', background:'white', color:'#374151', fontWeight:500 }}>
                 Cancel
               </button>
-              <button onClick={confirmDelete}
-                style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14, cursor:'pointer',
-                  border:'none', fontWeight:600, color:'white', background:'#991b1b' }}>
+              <button onClick={confirmDelete} style={{ flex:1, padding:'10px', borderRadius:8, fontSize:14,
+                fontWeight:600, cursor:'pointer', border:'none', color:'white', background:'#991b1b' }}>
                 Yes, delete
               </button>
             </div>
@@ -1475,6 +2307,7 @@ function GamesPage() {
     </div>
   )
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Root App — routing + phone gate
