@@ -1604,7 +1604,6 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
                 </div>
               ))}
             </div>
-            </div>
             {gcAuth && (
               <button onClick={() => setResetConfirm(true)}
                 style={{ marginTop:8, fontSize:11, padding:'4px 10px', borderRadius:6, cursor:'pointer',
