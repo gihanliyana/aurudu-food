@@ -1147,18 +1147,22 @@ const DEFAULT_GAMES = [
   { name:'Aurudu Kumariya & Kumara',              kids8under:false, kids8over:false, adultsCommon:false, adultsMen:true,  adultsWomen:true,  group:false },
 ]
 
-const GAMES_STORE_KEY = 'aurudu_games_v1'
+// ── Firestore collection/doc references ──
+const GAME_CONFIG_COL = 'game_config'
+const GAMES_DOC       = 'games'
+const WINNERS_DOC     = 'winners'
+const SAGAUNU_DOC     = 'sagaunu'
+const GASLABU_DOC     = 'gaslabu_meta'
+const GASLABU_COL     = 'gaslabu_guesses'
 
-function loadGames() {
-  try {
-    const raw = localStorage.getItem(GAMES_STORE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch {}
-  return DEFAULT_GAMES
-}
-
-function saveGames(games) {
-  try { localStorage.setItem(GAMES_STORE_KEY, JSON.stringify(games)) } catch {}
+// Seed Firestore with DEFAULT_GAMES if the doc doesn't exist yet
+async function seedGamesIfNeeded() {
+  const ref = doc(db, GAME_CONFIG_COL, GAMES_DOC)
+  const snap = await getDocs(query(collection(db, GAME_CONFIG_COL)))
+  const exists = snap.docs.some(d => d.id === GAMES_DOC)
+  if (!exists) {
+    await setDoc(ref, { list: DEFAULT_GAMES })
+  }
 }
 
 function Tick({ yes }) {
@@ -1175,24 +1179,15 @@ const WINNER_EXCLUDED = SPECIAL_GAMES  // these are handled by their own panels
 const GC_PASSWORD         = 'slpittsgc'    // general game coordinator (winner entry)
 const SAGAUNU_GC_PASSWORD = 'slpittssa'    // coordinator for Sagaunu Amutha game only
 const GASLABU_GC_PASSWORD = 'slpittsga'    // coordinator for Gaslabu game only
-const WINNERS_STORE_KEY = 'aurudu_winners_v1'
-
-// ── localStorage keys for special games ──
-const SAGAUNU_KEY  = 'aurudu_sagaunu_v1'
-const GASLABU_KEY  = 'aurudu_gaslabu_v1'
-
-function lsGet(key, def) {
-  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : def } catch { return def }
-}
-function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)) } catch {} }
 
 // ─────────────────────────────────────────────────────────────
-// Special Game: Sagaunu Amutha Thereema
+// Special Game: Sagaunu Amutha Thereema  — Firestore backed
 // ─────────────────────────────────────────────────────────────
 function SagaunuPanel({ onWinnerSet, families }) {
   const allPeople = families.flatMap(f => (f.members || []).map(m => m.name)).sort()
 
-  const [data, setData]           = useState(() => lsGet(SAGAUNU_KEY, { secret:null, votes:[], revealed:false }))
+  const [data, setData]           = useState({ secret:null, votes:[], revealed:false })
+  const [loading, setLoading]     = useState(true)
   const [gcAuth, setGcAuth]       = useState(false)
   const [gcPrompt, setGcPrompt]   = useState(false)
   const [phase, setPhase]         = useState('vote')
@@ -1201,53 +1196,83 @@ function SagaunuPanel({ onWinnerSet, families }) {
   const [vGuess, setVGuess]   = useState('')
   const [vName, setVName]     = useState('')
   const [vErr, setVErr]       = useState('')
+  const [saving, setSaving]   = useState(false)
   const [resetConfirm, setResetConfirm] = useState(false)
 
-  function persist(next) { setData(next); lsSet(SAGAUNU_KEY, next) }
+  const sagaunuRef = doc(db, GAME_CONFIG_COL, SAGAUNU_DOC)
+
+  // Live listener
+  useEffect(() => {
+    const unsub = onSnapshot(sagaunuRef, snap => {
+      if (snap.exists()) setData(snap.data())
+      else setData({ secret:null, votes:[], revealed:false })
+      setLoading(false)
+    })
+    return unsub
+  }, [])
 
   function handleGcLogin(pass, setErr) {
     if (pass !== SAGAUNU_GC_PASSWORD) { setErr('Incorrect password.'); return }
     setGcAuth(true); setGcPrompt(false)
   }
 
-  function saveSecret() {
+  async function saveSecret() {
     if (!secretPick) { setSecretErr('Please select a person.'); return }
-    persist({ ...data, secret: secretPick })
+    await setDoc(sagaunuRef, { ...data, secret: secretPick }, { merge:true })
     setSecretPick(''); setSecretErr('')
   }
 
-  function submitVote() {
+  async function submitVote() {
     if (!vGuess) { setVErr('Please select your guess.'); return }
     if (!vName.trim()) { setVErr('Please enter your name.'); return }
-    const already = data.votes.find(v => v.guesserName.trim().toLowerCase() === vName.trim().toLowerCase())
-    if (already) { setVErr('This name has already voted. Each person can only vote once.'); return }
-    const vote = { guesserName: vName.trim(), guessedPerson: vGuess, ts: Date.now() }
-    persist({ ...data, votes: [...data.votes, vote] })
-    setVGuess(''); setVName(''); setPhase('thanks')
-    setTimeout(() => setPhase('vote'), 3000)
+    setSaving(true)
+    try {
+      // Use transaction to prevent duplicate votes
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(sagaunuRef)
+        const current = snap.exists() ? snap.data() : { secret:null, votes:[], revealed:false }
+        const already = (current.votes || []).find(
+          v => v.guesserName.trim().toLowerCase() === vName.trim().toLowerCase()
+        )
+        if (already) throw new Error('duplicate')
+        const vote = { guesserName: vName.trim(), guessedPerson: vGuess, ts: Date.now() }
+        tx.set(sagaunuRef, { ...current, votes: [...(current.votes||[]), vote] }, { merge:true })
+      })
+      setVGuess(''); setVName(''); setPhase('thanks')
+      setTimeout(() => setPhase('vote'), 3000)
+    } catch(e) {
+      if (e.message === 'duplicate') setVErr('This name has already voted. Each person can only vote once.')
+      else setVErr('Error saving vote. Please try again.')
+    }
+    setSaving(false)
   }
 
-  function reveal() {
+  async function reveal() {
     if (!data.secret) return
-    const correct = data.votes.filter(v => v.guessedPerson === data.secret)
+    const correct = (data.votes||[]).filter(v => v.guessedPerson === data.secret)
+    let winnerName
     if (correct.length > 0) {
       correct.sort((a,b) => a.ts - b.ts)
-      onWinnerSet(`${correct[0].guesserName} (guessed correctly at ${new Date(correct[0].ts).toLocaleTimeString()})`)
+      winnerName = `${correct[0].guesserName} (guessed correctly at ${new Date(correct[0].ts).toLocaleTimeString()})`
     } else {
-      onWinnerSet('No correct guesses — no winner')
+      winnerName = 'No correct guesses — no winner'
     }
-    persist({ ...data, revealed: true })
+    await setDoc(sagaunuRef, { ...data, revealed: true }, { merge:true })
+    onWinnerSet(winnerName)
   }
 
-  function doReset(pass, setErr) {
+  async function doReset(pass, setErr) {
     if (pass !== SAGAUNU_GC_PASSWORD) { setErr('Incorrect coordinator password.'); return }
-    persist({ secret:null, votes:[], revealed:false })
+    await setDoc(sagaunuRef, { secret:null, votes:[], revealed:false })
     onWinnerSet(null)
     setResetConfirm(false); setPhase('vote')
   }
 
+  if (loading) return <div style={{ padding:16, textAlign:'center', color:'#9ca3af', fontSize:13 }}>Loading…</div>
+
   const secretSet  = !!data.secret
   const isRevealed = data.revealed
+  const votes      = data.votes || []
 
   return (
     <div style={{ border:'1px solid #d8b4fe', borderRadius:12, overflow:'hidden', marginTop:8 }}>
@@ -1318,7 +1343,7 @@ function SagaunuPanel({ onWinnerSet, families }) {
             ) : (
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span style={{ fontSize:13, color:'#166534', fontWeight:600 }}>✓ Secret locked in</span>
-                <button onClick={() => persist({ ...data, secret:null })}
+                <button onClick={() => setDoc(sagaunuRef, { ...data, secret:null }, { merge:true })}
                   style={{ fontSize:11, padding:'3px 10px', borderRadius:6, cursor:'pointer',
                     border:'1px solid #fca5a5', background:'#fee2e2', color:'#991b1b' }}>
                   Change
@@ -1336,9 +1361,9 @@ function SagaunuPanel({ onWinnerSet, families }) {
               🔓 Revealed! Secret Sagaunu Amutha: <strong>{data.secret || '—'}</strong>
             </p>
             <div style={{ maxHeight:200, overflowY:'auto' }}>
-              {data.votes.length === 0
+              {votes.length === 0
                 ? <p style={{ fontSize:12, color:'#9ca3af', margin:0 }}>No votes were submitted.</p>
-                : data.votes.slice().sort((a,b)=>a.ts-b.ts).map((v,i) => (
+                : votes.slice().sort((a,b)=>a.ts-b.ts).map((v,i) => (
                   <div key={i} style={{ display:'flex', justifyContent:'space-between',
                     padding:'5px 8px', background: v.guessedPerson===data.secret ? '#dcfce7' : 'white',
                     borderRadius:6, marginBottom:4, border: v.guessedPerson===data.secret ? '1px solid #86efac' : '1px solid #e5e7eb' }}>
@@ -1400,10 +1425,11 @@ function SagaunuPanel({ onWinnerSet, families }) {
                   </select>
                 </div>
                 {vErr && <p style={{ fontSize:12, color:'#ef4444', margin:'0 0 8px' }}>{vErr}</p>}
-                <button onClick={submitVote}
+                <button onClick={submitVote} disabled={saving}
                   style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:14, fontWeight:600,
-                    cursor:'pointer', border:'none', background:'#7e22ce', color:'white' }}>
-                  Submit my vote 🗳️
+                    cursor: saving ? 'not-allowed' : 'pointer', border:'none',
+                    background: saving ? '#a78bfa' : '#7e22ce', color:'white' }}>
+                  {saving ? 'Saving…' : 'Submit my vote 🗳️'}
                 </button>
                 <p style={{ fontSize:11, color:'#9ca3af', textAlign:'center', margin:'6px 0 0' }}>
                   Votes are recorded once — they cannot be edited after submission.
@@ -1438,63 +1464,94 @@ function SagaunuPanel({ onWinnerSet, families }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Special Game: Gaslabu Gediye Ata Ganan Kireema
+// Special Game: Gaslabu Gediye Ata Ganan Kireema — Firestore backed
 // ─────────────────────────────────────────────────────────────
 function GaslabuPanel({ onWinnerSet, currentWinner }) {
-  const [data, setData]       = useState(() => lsGet(GASLABU_KEY, { actual:null, guesses:[], closed:false }))
-  const [gcAuth, setGcAuth]   = useState(false)
+  const [meta, setMeta]         = useState({ actual:null, closed:false })
+  const [guesses, setGuesses]   = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [gcAuth, setGcAuth]     = useState(false)
   const [gcPrompt, setGcPrompt] = useState(false)
-  const [gName, setGName]     = useState('')
-  const [gCount, setGCount]   = useState('')
-  const [gErr, setGErr]       = useState('')
-  const [phase, setPhase]     = useState('form')
+  const [gName, setGName]       = useState('')
+  const [gCount, setGCount]     = useState('')
+  const [gErr, setGErr]         = useState('')
+  const [phase, setPhase]       = useState('form')
+  const [saving, setSaving]     = useState(false)
   const [actualInput, setActualInput] = useState('')
   const [actualErr, setActualErr]     = useState('')
   const [resetConfirm, setResetConfirm] = useState(false)
 
-  function persist(next) { setData(next); lsSet(GASLABU_KEY, next) }
+  const metaRef = doc(db, GAME_CONFIG_COL, GASLABU_DOC)
+
+  // Live listeners
+  useEffect(() => {
+    const u1 = onSnapshot(metaRef, snap => {
+      setMeta(snap.exists() ? snap.data() : { actual:null, closed:false })
+      setLoading(false)
+    })
+    const u2 = onSnapshot(
+      query(collection(db, GASLABU_COL), orderBy('ts', 'asc')),
+      snap => setGuesses(snap.docs.map(d => ({ id:d.id, ...d.data() })))
+    )
+    return () => { u1(); u2() }
+  }, [])
 
   function handleGcLogin(pass, setErr) {
     if (pass !== GASLABU_GC_PASSWORD) { setErr('Incorrect password.'); return }
     setGcAuth(true); setGcPrompt(false)
   }
 
-  function submitGuess() {
+  async function submitGuess() {
     if (!gName.trim()) { setGErr('Please enter your name.'); return }
     const n = parseInt(gCount)
     if (!gCount || isNaN(n) || n < 0 || n > 9999) { setGErr('Please enter a valid seed count (0–9999).'); return }
-    const already = data.guesses.find(g => g.name.trim().toLowerCase() === gName.trim().toLowerCase())
-    if (already) { setGErr('This name already has a guess recorded.'); return }
-    persist({ ...data, guesses: [...data.guesses, { name:gName.trim(), count:n, ts:Date.now() }] })
-    setGName(''); setGCount(''); setPhase('thanks')
-    setTimeout(() => setPhase('form'), 3000)
+    setSaving(true)
+    try {
+      await runTransaction(db, async tx => {
+        const colSnap = await getDocs(collection(db, GASLABU_COL))
+        const already = colSnap.docs.find(
+          d => d.data().name.trim().toLowerCase() === gName.trim().toLowerCase()
+        )
+        if (already) throw new Error('duplicate')
+        const newRef = doc(collection(db, GASLABU_COL))
+        tx.set(newRef, { name: gName.trim(), count: n, ts: Date.now() })
+      })
+      setGName(''); setGCount(''); setPhase('thanks')
+      setTimeout(() => setPhase('form'), 3000)
+    } catch(e) {
+      if (e.message === 'duplicate') setGErr('This name already has a guess recorded.')
+      else setGErr('Error saving guess. Please try again.')
+    }
+    setSaving(false)
   }
 
-  function closeGame() {
+  async function closeGame() {
     if (!actualInput || isNaN(parseInt(actualInput))) { setActualErr('Enter the actual seed count.'); return }
     const actual = parseInt(actualInput)
-    const sorted = data.guesses.slice().sort((a,b) => Math.abs(a.count-actual) - Math.abs(b.count-actual) || a.ts-b.ts)
+    const sorted = guesses.slice().sort((a,b) => Math.abs(a.count-actual) - Math.abs(b.count-actual) || a.ts-b.ts)
     const winner = sorted[0]
-    const closed = { ...data, actual, closed:true }
-    persist(closed)
-    if (winner) {
-      onWinnerSet(`${winner.name} (guessed ${winner.count}, actual: ${actual})`)
-    } else {
-      onWinnerSet('No guesses recorded')
-    }
+    await setDoc(metaRef, { actual, closed:true })
+    if (winner) onWinnerSet(`${winner.name} (guessed ${winner.count}, actual: ${actual})`)
+    else onWinnerSet('No guesses recorded')
     setActualInput(''); setActualErr('')
   }
 
-  function doReset(pass, setErr) {
+  async function doReset(pass, setErr) {
     if (pass !== GASLABU_GC_PASSWORD) { setErr('Incorrect coordinator password.'); return }
-    persist({ actual:null, guesses:[], closed:false })
+    await setDoc(metaRef, { actual:null, closed:false })
+    // delete all guesses
+    const snap = await getDocs(collection(db, GASLABU_COL))
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)))
     onWinnerSet(null)
     setResetConfirm(false); setPhase('form')
   }
 
-  const winner = data.closed && data.guesses.length > 0
-    ? data.guesses.slice().sort((a,b) => Math.abs(a.count-data.actual)-Math.abs(b.count-data.actual)||a.ts-b.ts)[0]
-    : null
+  if (loading) return <div style={{ padding:16, textAlign:'center', color:'#9ca3af', fontSize:13 }}>Loading…</div>
+
+  const sortedByCloseness = meta.closed
+    ? guesses.slice().sort((a,b) => Math.abs(a.count-meta.actual)-Math.abs(b.count-meta.actual)||a.ts-b.ts)
+    : []
+  const winner = sortedByCloseness[0] || null
 
   return (
     <div style={{ border:'1px solid #86efac', borderRadius:12, overflow:'hidden', marginTop:8 }}>
@@ -1503,7 +1560,7 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
         <div>
           <span style={{ fontSize:13, fontWeight:700, color:'white' }}>🎃 Gaslabu Gediye Ata Ganan Kireema</span>
           <span style={{ fontSize:11, color:'rgba(255,255,255,0.75)', marginLeft:8 }}>
-            {data.guesses.length} guess{data.guesses.length !== 1 ? 'es' : ''} · {data.closed ? 'Closed' : 'Open'}
+            {guesses.length} guess{guesses.length !== 1 ? 'es' : ''} · {meta.closed ? 'Closed' : 'Open'}
           </span>
         </div>
         {gcAuth && (
@@ -1524,28 +1581,29 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
 
       <div style={{ padding:'12px 14px', background:'#f0fdf4' }}>
         {/* Results shown after closing */}
-        {data.closed && (
+        {meta.closed && (
           <div style={{ background:'#dcfce7', border:'1px solid #86efac', borderRadius:10, padding:'12px', marginBottom:'12px' }}>
             <p style={{ fontSize:13, fontWeight:700, color:'#166534', margin:'0 0 6px' }}>
-              🏆 Actual seed count: <strong>{data.actual}</strong>
+              🏆 Actual seed count: <strong>{meta.actual}</strong>
             </p>
             {winner && (
               <p style={{ fontSize:13, color:'#166534', margin:'0 0 10px' }}>
                 Winner: <strong>{winner.name}</strong> — guessed {winner.count}
-                {winner.count === data.actual ? ' (exact!)' : ` (off by ${Math.abs(winner.count - data.actual)})`}
+                {winner.count === meta.actual ? ' (exact!)' : ` (off by ${Math.abs(winner.count - meta.actual)})`}
               </p>
             )}
             <div style={{ maxHeight:200, overflowY:'auto' }}>
-              {data.guesses.slice().sort((a,b) => Math.abs(a.count-data.actual)-Math.abs(b.count-data.actual)||a.ts-b.ts).map((g,i) => (
-                <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+              {sortedByCloseness.map((g,i) => (
+                <div key={g.id||i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
                   padding:'5px 8px', borderRadius:6, marginBottom:3,
                   background: i===0 ? '#bbf7d0' : 'white', border: i===0 ? '1px solid #4ade80' : '1px solid #e5e7eb' }}>
                   <span style={{ fontSize:12 }}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`} <strong>{g.name}</strong> → {g.count}</span>
                   <span style={{ fontSize:11, color:'#6b7280' }}>
-                    {g.count===data.actual ? 'Exact!' : `±${Math.abs(g.count-data.actual)}`} · {new Date(g.ts).toLocaleTimeString()}
+                    {g.count===meta.actual ? 'Exact!' : `±${Math.abs(g.count-meta.actual)}`} · {new Date(g.ts).toLocaleTimeString()}
                   </span>
                 </div>
               ))}
+            </div>
             </div>
             {gcAuth && (
               <button onClick={() => setResetConfirm(true)}
@@ -1558,7 +1616,7 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
         )}
 
         {/* GC: close & enter actual */}
-        {gcAuth && !data.closed && (
+        {gcAuth && !meta.closed && (
           <div style={{ background:'white', border:'1px solid #86efac', borderRadius:10, padding:'12px', marginBottom:'12px' }}>
             <p style={{ fontSize:12, fontWeight:600, color:'#166534', margin:'0 0 8px' }}>
               📊 Coordinator: Enter actual seed count to close guessing & pick winner
@@ -1575,16 +1633,16 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
               </button>
             </div>
             {actualErr && <p style={{ fontSize:12, color:'#ef4444', margin:'6px 0 0' }}>{actualErr}</p>}
-            {data.guesses.length > 0 && (
+            {guesses.length > 0 && (
               <p style={{ fontSize:11, color:'#6b7280', margin:'6px 0 0' }}>
-                Current guesses: {data.guesses.map(g => `${g.name} (${g.count})`).join(' · ')}
+                Current guesses: {guesses.map(g => `${g.name} (${g.count})`).join(' · ')}
               </p>
             )}
           </div>
         )}
 
         {/* Guess form */}
-        {!data.closed && (
+        {!meta.closed && (
           <>
             {phase === 'thanks' ? (
               <div style={{ textAlign:'center', padding:'14px', background:'#dcfce7',
@@ -1614,10 +1672,11 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
                   </div>
                 </div>
                 {gErr && <p style={{ fontSize:12, color:'#ef4444', margin:'0 0 8px' }}>{gErr}</p>}
-                <button onClick={submitGuess}
+                <button onClick={submitGuess} disabled={saving}
                   style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:14, fontWeight:600,
-                    cursor:'pointer', border:'none', background:'#166534', color:'white' }}>
-                  Submit my guess 🎯
+                    cursor: saving ? 'not-allowed' : 'pointer', border:'none',
+                    background: saving ? '#4ade80' : '#166534', color:'white' }}>
+                  {saving ? 'Saving…' : 'Submit my guess 🎯'}
                 </button>
                 <p style={{ fontSize:11, color:'#9ca3af', textAlign:'center', margin:'6px 0 0' }}>
                   One guess per person · Cannot be edited after submission
@@ -1644,13 +1703,9 @@ function GaslabuPanel({ onWinnerSet, currentWinner }) {
   )
 }
 
-function loadWinners() {
-  try { const r = localStorage.getItem(WINNERS_STORE_KEY); if (r) return JSON.parse(r) } catch {}
-  return {}
-}
-function saveWinnersStore(w) {
-  try { localStorage.setItem(WINNERS_STORE_KEY, JSON.stringify(w)) } catch {}
-}
+// Winners now live in Firestore — these are no-ops kept for reference only
+function loadWinners() { return {} }
+function saveWinnersStore() {}
 
 // ── shared password modal ──────────────────────────────────────
 function PasswordModal({ title, subtitle, icon, iconBg, confirmLabel, confirmBg, onConfirm, onCancel }) {
@@ -1713,16 +1768,16 @@ function WinnersPanel({ games, families, winners, persistWinners }) {
     setEditCell({ game: gameName, colKey })
   }
 
-  function saveWinner() {
+  async function saveWinner() {
     if (!draftName.trim()) return
     const k = winnerKey(editCell.game, editCell.colKey)
-    persist({ ...winners, [k]: { name: draftName.trim(), ts: Date.now() } })
+    await persist({ ...winners, [k]: { name: draftName.trim(), ts: Date.now() } })
     setEditCell(null); setDraftName('')
   }
 
-  function deleteWinner(gameName, colKey) {
+  async function deleteWinner(gameName, colKey) {
     const k = winnerKey(gameName, colKey)
-    const next = { ...winners }; delete next[k]; persist(next)
+    const next = { ...winners }; delete next[k]; await persist(next)
     setDelConfirm(null)
   }
 
@@ -1975,7 +2030,7 @@ const GAME_TABS = [
 ]
 
 function GamesPage() {
-  const [games, setGames]           = useState(loadGames)
+  const [games, setGames]           = useState(DEFAULT_GAMES)
   const [families, setFamilies]     = useState([])
   const [subPage, setSubPage]       = useState('table')
   const [modModal, setModModal]     = useState(null)
@@ -1985,18 +2040,42 @@ function GamesPage() {
   const [formCols, setFormCols]     = useState({})
   const [formErr, setFormErr]       = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
-  // shared winner state (lifted so board + entry stay in sync)
-  const [winners, setWinners]       = useState(loadWinners)
+  const [winners, setWinners]       = useState({})
+  const [gamesLoading, setGamesLoading] = useState(true)
 
-  function persistGames(next) { setGames(next); saveGames(next) }
-  function persistWinners(next) { setWinners(next); saveWinnersStore(next) }
+  const gamesRef   = doc(db, GAME_CONFIG_COL, GAMES_DOC)
+  const winnersRef = doc(db, GAME_CONFIG_COL, WINNERS_DOC)
 
+  // Firestore listeners for games + winners + families
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'families'), snap => {
+    // Seed games doc on first load if it doesn't exist
+    const unsubGames = onSnapshot(gamesRef, async snap => {
+      if (snap.exists()) {
+        setGames(snap.data().list || DEFAULT_GAMES)
+      } else {
+        // First time — seed with defaults
+        await setDoc(gamesRef, { list: DEFAULT_GAMES })
+      }
+      setGamesLoading(false)
+    })
+    const unsubWinners = onSnapshot(winnersRef, snap => {
+      setWinners(snap.exists() ? (snap.data().map || {}) : {})
+    })
+    const unsubFamilies = onSnapshot(collection(db, 'families'), snap => {
       setFamilies(snap.docs.map(d => ({ id:d.id, ...d.data() })))
     })
-    return unsub
+    return () => { unsubGames(); unsubWinners(); unsubFamilies() }
   }, [])
+
+  async function persistGames(next) {
+    setGames(next)
+    await setDoc(gamesRef, { list: next })
+  }
+
+  async function persistWinners(next) {
+    setWinners(next)
+    await setDoc(winnersRef, { map: next })
+  }
 
   function openModModal(type, idx = null) { setModTarget(idx); setModModal(type) }
 
@@ -2016,16 +2095,16 @@ function GamesPage() {
     }
   }
 
-  function saveForm() {
+  async function saveForm() {
     if (!formName.trim()) { setFormErr('Game name is required.'); return }
     const entry = { name: formName.trim(), ...formCols }
-    if (editMode.type === 'add') persistGames([...games, entry])
-    else persistGames(games.map((g, i) => i === editMode.idx ? entry : g))
+    if (editMode.type === 'add') await persistGames([...games, entry])
+    else await persistGames(games.map((g, i) => i === editMode.idx ? entry : g))
     setEditMode(null); setFormErr('')
   }
 
-  function confirmDelete() {
-    persistGames(games.filter((_, i) => i !== deleteTarget))
+  async function confirmDelete() {
+    await persistGames(games.filter((_, i) => i !== deleteTarget))
     setDeleteTarget(null)
   }
 
@@ -2182,18 +2261,22 @@ function GamesPage() {
           </div>
           <SagaunuPanel families={families}
             currentWinner={winners['Sagaunu Amutha Thereema||adultsCommon']?.name}
-            onWinnerSet={name => {
+            onWinnerSet={async name => {
               const k = 'Sagaunu Amutha Thereema||adultsCommon'
-              if (!name) { const n={...winners}; delete n[k]; persistWinners(n) }
-              else persistWinners({...winners, [k]:{ name, ts:Date.now() }})
+              const next = { ...winners }
+              if (!name) delete next[k]
+              else next[k] = { name, ts: Date.now() }
+              await persistWinners(next)
             }} />
           <div style={{ marginTop:'1.5rem' }}>
             <GaslabuPanel
               currentWinner={winners['Gaslabu Gediye Ata Ganan Kireema||adultsCommon']?.name}
-              onWinnerSet={name => {
+              onWinnerSet={async name => {
                 const k = 'Gaslabu Gediye Ata Ganan Kireema||adultsCommon'
-                if (!name) { const n={...winners}; delete n[k]; persistWinners(n) }
-                else persistWinners({...winners, [k]:{ name, ts:Date.now() }})
+                const next = { ...winners }
+                if (!name) delete next[k]
+                else next[k] = { name, ts: Date.now() }
+                await persistWinners(next)
               }} />
           </div>
           <div style={{ marginTop:'2rem' }}><Footer /></div>
